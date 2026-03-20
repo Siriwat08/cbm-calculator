@@ -85,27 +85,12 @@ interface DimensionCheck {
 // Storage Key
 const STORAGE_KEY = 'cbm_calculator_data'
 
-// Helper to load initial data
-const loadSavedData = () => {
-  if (typeof window === 'undefined') return { items: [{ id: '1', width: '', length: '', height: '', qty: '1', weight: '' }], selectedTruck: '' }
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      const data = JSON.parse(saved)
-      return {
-        items: data.items || [{ id: '1', width: '', length: '', height: '', qty: '1', weight: '' }],
-        selectedTruck: data.selectedTruck || ''
-      }
-    }
-  } catch (e) {
-    console.error('Failed to load saved data:', e)
-  }
-  return { items: [{ id: '1', width: '', length: '', height: '', qty: '1', weight: '' }], selectedTruck: '' }
-}
+// Initial empty item
+const emptyItem = () => ({ id: Date.now().toString(), width: '', length: '', height: '', qty: '1', weight: '' })
 
 export default function CBMCalculator() {
-  const [selectedTruck, setSelectedTruck] = useState<string>(() => loadSavedData().selectedTruck)
-  const [items, setItems] = useState<CargoItem[]>(() => loadSavedData().items)
+  const [selectedTruck, setSelectedTruck] = useState<string>('')
+  const [items, setItems] = useState<CargoItem[]>([emptyItem()])
   const [result, setResult] = useState<{
     totalCBM: number
     totalWeight: number
@@ -118,9 +103,11 @@ export default function CBMCalculator() {
     dimensionIssues: DimensionCheck[]
   } | null>(null)
 
-  // Save data
+  // Save data to localStorage (client-side only)
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, selectedTruck }))
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, selectedTruck }))
+    }
   }, [items, selectedTruck])
 
   // Add new item
