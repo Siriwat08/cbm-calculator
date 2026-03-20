@@ -230,3 +230,227 @@ Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allow
  GET / 200 in 43ms (compile: 1945µs, render: 41ms)
  GET / 200 in 42ms (compile: 3ms, render: 39ms)
  GET / 200 in 38ms (compile: 3ms, render: 36ms)
+==========================================
+[2026-03-20 10:42:33] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.11ms] ".env"
+==========================================
+bun install v1.3.10 (30e609e0)
+[2026-03-20 10:42:33] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.10ms] ".env"
+bun install v1.3.10 (30e609e0)
+==========================================
+[2026-03-20 10:42:33] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.09ms] ".env"
+bun install v1.3.10 (30e609e0)
+FileNotFound: failed copying files from cache to destination for package @lexical/mark
+FileNotFound: failed copying files from cache to destination for package @lexical/table
+FileNotFound: failed copying files from cache to destination for package react-error-boundary
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-use-rect
+FileNotFound: failed copying files from cache to destination for package @codemirror/lint
+FileNotFound: failed copying files from cache to destination for package compute-scroll-into-view
+FileNotFound: failed copying files from cache to destination for package argparse
+FileNotFound: failed copying files from cache to destination for package @types/unist
+FileNotFound: failed copying files from cache to destination for package ccount
+FileNotFound: failed copying files from cache to destination for package mdast-util-to-string
+FileNotFound: failed copying files from cache to destination for package micromark
+FileNotFound: failed copying files from cache to destination for package micromark-util-normalize-identifier
+FileNotFound: failed copying files from cache to destination for package vfile-message
+FileNotFound: failed copying files from cache to destination for package longest-streak
+FileNotFound: failed copying files from cache to destination for package mdast-util-phrasing
+FileNotFound: failed copying files from cache to destination for package micromark-factory-whitespace
+FileNotFound: failed copying files from cache to destination for package micromark-util-chunked
+FileNotFound: failed copying files from cache to destination for package micromark-util-resolve-all
+FileNotFound: failed copying files from cache to destination for package uvu
+FileNotFound: failed copying files from cache to destination for package estree-util-is-identifier-name
+FileNotFound: failed copying files from cache to destination for package micromark-factory-mdx-expression
+FileNotFound: failed copying files from cache to destination for package micromark-util-events-to-acorn
+FileNotFound: failed copying files from cache to destination for package micromark-extension-mdx-expression
+FileNotFound: failed copying files from cache to destination for package diff
+FileNotFound: failed copying files from cache to destination for package use-callback-ref
+FileNotFound: failed copying files from cache to destination for package use-sidecar
+FileNotFound: failed copying files from cache to destination for package oidc-token-hash
+FileNotFound: failed copying files from cache to destination for package pretty-format
+FileNotFound: failed copying files from cache to destination for package node-addon-api
+FileNotFound: failed copying files from cache to destination for package picomatch
+FileNotFound: failed copying files from cache to destination for package @swc/core-linux-x64-musl
+FileNotFound: failed copying files from cache to destination for package intl-messageformat
+FileNotFound: failed copying files from cache to destination for package effect
+FileNotFound: failed copying files from cache to destination for package @jridgewell/gen-mapping
+FileNotFound: failed copying files from cache to destination for package @jridgewell/trace-mapping
+FileNotFound: failed copying files from cache to destination for package call-bind
+PathAlreadyExists: failed copying files from cache to destination for package es-abstract
+FileNotFound: failed copying files from cache to destination for package @typescript-eslint/scope-manager
+FileNotFound: failed copying files from cache to destination for package @lezer/java
+FileNotFound: failed copying files from cache to destination for package @lezer/php
+FileNotFound: failed copying files from cache to destination for package @lezer/python
+FileNotFound: failed copying files from cache to destination for package @lezer/rust
+PathAlreadyExists: failed copying files from cache to destination for package @lezer/yaml
+FileNotFound: failed copying files from cache to destination for package @codesandbox/nodebox
+FileNotFound: failed copying files from cache to destinationFileNotFound: failed copying files from cache to destination for package @types/unist
+FileNotFound: failed copying files from cache to destination for package stringify-entities
+FileNotFound: failed copying files from cache to destination for package micromark
+FileNotFound: failed copying files from cache to destination for package micromark-util-decode-numeric-character-reference
+FileNotFound: failed copying files from cache to destination for package markdown-table
+FileNotFound: failed copying files from cache to destination for package mdast-util-mdx-expression
+FileNotFound: failed copying files from cache to destination for package micromark-util-classify-character
+FileNotFound: failed copying files from cache to destination for package uvu
+FileNotFound: failed copying files from cache to destination for package micromark-util-events-to-acorn
+FileNotFound: failed copying files from cache to destination for package diff
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-use-effect-event
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-use-escape-keydown
+FileNotFound: failed copying files from cache to destination for package react-remove-scroll-bar
+FileNotFound: failed copying files from cache to destination for package use-callback-ref
+FileNotFound: failed copying files from cache to destination for package use-sidecar
+FileNotFound: failed copying files from cache to destination for package gopd
+FileNotFound: failed copying files from cache to destination for package safe-array-concat
+PathAlreadyExists: failed copying files from cache to destination for package @babel/helpers
+FileNotFound: failed copying files from cache to destination for package @typescript-eslint/scope-manager
+FileNotFound: failed copying files from cache to destination for package @typescript-eslint/type-utils
+FileNotFound: failed copying files from cache to destination for package @lezer/java
+FileNotFound: failed copying files from cache to destination for package @lezer/javascript
+PathAlreadyExists: failed copying files from cache to destination for package @lezer/json
+FileNotFound: failed copying files from cache to destination for package @lezer/php
+FileNotFound: failed copying files from cache to destination for package @lezer/rust
+FileNotFound: failed copying files from cache to destination for package @lezer/sass
+FileNotFound: failed copying files from cache to destination for package yjs
+PathAlreadyExists: failed copying files from cache to destination for package micromark-core-commonmark
+FileNotFound: failed copying files from cache to destination for package @formatjs/ecma402-abstract
+FileNotFound: failed copying files from cache to destination for package @formatjs/icu-messageformat-parser
+FileNotFound: failed copying files from cache to destination for package style-to-object
+FileNotFound: failed copying files from cache to destination for package dom-helpers
+FileNotFound: failed copying files from cache to destination for package data-view-byte-length
+FileNotFound: failed copying files from cache to destination for package is-array-buffer
+FileNotFound: failed copying files from cache to destination for package object-inspect
+FileNotFound: failed copying files from cache to destination for package string.prototype.trim
+FileNotFound: failed copying files from cache to destination for package has-tostringtag
+FileNotFound: failed copying files from cache to destination for package dunder-proto
+FileNotFound: failed copying files from cache to destination for package jsesc
+FileNotFound: failed copying files from cache to destination for package @babel/compat-data
+FileNotFound: failed copying files from cache to destination for package d
+FileNotFound: failed copying files from cache to destination for package ext
+FileNotFound: failed copying files from cache to destination for package lib0
+FileNotFound: failed copying files from cache to destination for package citty
+FileNotFound: failed copying files from cache to destination for package consola
+FileNotFound for package static-browser-server
+FileNotFound: failed copying files from cache to destination for package @react-hook/passive-layout-effect
+FileNotFound: failed copying files from cache to destination for package es6-symbol
+FileNotFound: failed copying files from cache to destination for package @floating-ui/utils
+FileNotFound: failed copying files from cache to destination for package yjs
+FileNotFound: failed copying files from cache to destination for package @floating-ui/dom
+PathAlreadyExists: failed copying files from cache to destination for package is-alphanumerical
+FileNotFound: failed copying files from cache to destination for package is-decimal
+FileNotFound: failed copying files from cache to destination for package character-entities-html4
+FileNotFound: failed copying files from cache to destination for package character-entities
+PathAlreadyExists: failed copying files from cache to destination for package @types/debug
+FileNotFound: failed copying files from cache to destination for package es-to-primitive
+FileNotFound: failed copying files from cache to destination for package function.prototype.name
+FileNotFound: failed copying files from cache to destination for package get-proto
+FileNotFound: failed copying files from cache to destination for package is-data-view
+FileNotFound: failed copying files from cache to destination for package is-set
+FileNotFound: failed opening node_modules/package dir for package is-typed-array
+FileNotFound: failed copying files from cache to destination for package is-weakref
+FileNotFound: failed copying files from cache to destination for package typed-array-buffer
+FileNotFound: failed copying files from cache to destination for package typed-array-byte-offset
+FileNotFound: failed copying files from cache to destination for package unbox-primitive
+FileNotFound: failed copying files from cache to destination for package js-tokens
+FileNotFound: failed copying files from cache to destination for package functions-have-names
+FileNotFound: failed copying files from cache to destination for package side-channel-list
+FileNotFound: failed copying files from cache to destination for package side-channel-map
+FileNotFound: failed copying files from cache to destination for package side-channel-weakmap
+FileNotFound: failed copying files from cache to destination for package @babel/helper-module-imports
+FileNotFound: failed copying files from cache to destination for package ieee754
+FileNotFound: failed copying files from cache to destination for package lib0
+FileNotFound: failed copying files from cache to destination for package is-date-object
+FileNotFound: failed copying files from cache to destination for package is-symbol
+FileNotFound: failed copying files from cache to destination for package for-each
+FileNotFound: failed copying files from cache to destination for package reflect.getprototypeof
+FileNotFound: failed copying files from cache to destination for package has-bigints
+FileNotFound: failed copying files from cache to destination for package which-boxed-primitive
+FileNotFound: failed copying files from cache to destination for package electron-to-chromium
+FileNotFound: failed copying files from cache to destination for package node-releases
+FileNotFound: failed copying files from cache to destination for package update-browserslist-db
+FileNotFound: failed copying files from cache to destination for package es5-ext
+PathAlreadyExists: failed copying files from cache to destination for package is-async-function
+PathAlreadyExists: failed copying files from cache to destination for package is-finalizationregistry
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-slot
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-primitive
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-context
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-context
+FileNotFound: failed copying files from cache to destination for package : failed copying files from cache to destination for package node-fetch-native
+FileNotFound: failed copying files from cache to destination for package destr
+FileNotFound: failed copying files from cache to destination for package which-collection
+FileNotFound: failed copying files from cache to destination for package event-emitter
+FileNotFound: failed copying files from cache to destination for package async-function
+FileNotFound: failed copying files from cache to destination for package generator-function
+FileNotFound: failed copying files from cache to destination for package is-map
+FileNotFound: failed copying files from cache to destination for package is-weakmap
+FileNotFound: failed copying files from cache to destination for package is-weakset
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-slot
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-primitive
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-context
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-context
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-slot
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-primitive
+FileNotFound: failed copying files from cache to destination for package postcss
+FileNotFound: failed copying files from cache to destination for package uuid
+FileNotFound: failed copying files from cache to destination for package resolve
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-slot
+FileNotFound: failed copying files from cache to destination for package parse-entities
+FileNotFound: failed copying files from cache to destination for package prismjs
+FileNotFound: failed copying files from cache to destination for package property-information
+FileNotFound: failed copying files from cache to destination for package lru-cache
+
+226 packages installed [1.75s]
+Failed to install 68 packages
+@radix-ui/react-slot
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-primitive
+FileNotFound: failed copying files from cache to destination for package postcss
+FileNotFound: failed copying files from cache to destination for package uuid
+FileNotFound: failed copying files from cache to destination for package resolve
+FileNotFound: failed copying files from cache to destination for package react-is
+FileNotFound: failed copying files from cache to destination for package prismjs
+
+237 packages installed [1.78s]
+Failed to install 96 packages
+error: Failed to link z-ai-web-dev-sdk: EEXIST
+FileNotFound: failed copying files from cache to destination for package react-error-boundary
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-arrow
+FileNotFound: failed copying files from cache to destination for package @radix-ui/react-use-rect
+FileNotFound: failed copying files from cache to destination for package @radix-ui/rect
+FileNotFound: failed copying files from cache to destination for package @codemirror/lint
+FileNotFound: failed copying files from cache to destination for package compute-scroll-into-view
+FileNotFound: failed copying files from cache to destination for package stringify-entities
+FileNotFound: failed copying files from cache to destination for package unist-util-visit-parents
+FileNotFound: failed copying files from cache to destination for package mdast-util-to-string
+FileNotFound: failed copying files from cache to destination for package vfile-message
+FileNotFound: failed copying files from cache to destination for package micromark-util-resolve-all
+FileNotFound: failed copying files from cache to destination for package node-addon-api
+FileNotFound: failed copying files from cache to destination for package @swc/core-linux-x64-musl
+FileNotFound: failed copying files from cache to destination for package effect
+PathAlreadyExists: failed copying files from cache to destination for package @lezer/yaml
+PathAlreadyExists: failed copying files from cache to destination for package outvariant
+FileNotFound: failed copying files from cache to destination for package static-browser-server
+PathAlreadyExists: failed copying files from cache to destination for package @react-hook/passive-layout-effect
+FileNotFound: failed copying files from cache to destination for package es6-symbol
+FileNotFound: failed copying files from cache to destination for package @floating-ui/utils
+FileNotFound: failed copying files from cache to destination for package tabbable
+FileNotFound: failed copying files from cache to destination for package @formatjs/ecma402-abstract
+FileNotFound: failed copying files from cache to destination for package exsolve
+FileNotFound: failed copying files from cache to destination for package giget
+FileNotFound: failed copying files from cache to destination for package ohash
+FileNotFound: failed copying files from cache to destination for package perfect-debounce
+FileNotFound: failed copying files from cache to destination for package pkg-types
+FileNotFound: failed copying files from cache to destination for package rc9
+FileNotFound: failed copying files from cache to destination for package @standard-schema/spec
+FileNotFound: failed copying files from cache to destination for package which-collection
+FileNotFound: failed copying files from cache to destination for package event-emitter
+FileNotFound: failed copying files from cache to destination for package async-function
+FileNotFound: failed copying files from cache to destination for package generator-function
+FileNotFound: failed copying files from cache to destination for package is-map
+FileNotFound: failed copying files from cache to destination for package is-weakmap

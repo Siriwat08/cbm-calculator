@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { 
   Truck, 
   Package, 
@@ -872,26 +871,27 @@ export default function CBMCalculator() {
       </footer>
 
       {/* Image Popup Dialog */}
-      <Dialog open={!!popupImage} onOpenChange={() => setPopupImage(null)}>
-        <DialogContent className="max-w-4xl w-full p-0 bg-transparent border-none shadow-none">
-          <DialogTitle className="sr-only">{popupImage?.alt}</DialogTitle>
-          <div className="relative">
+      {popupImage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80"
+          onClick={() => setPopupImage(null)}
+        >
+          <div className="relative max-w-4xl w-full mx-4">
             <button
               onClick={() => setPopupImage(null)}
-              className="absolute top-2 right-2 z-10 bg-black/50 text-white rounded-full p-2 hover:bg-black/70 transition-colors"
+              className="absolute -top-2 -right-2 z-10 bg-white text-gray-800 rounded-full p-2 hover:bg-gray-100 transition-colors shadow-lg"
             >
               <XCircle className="w-6 h-6" />
             </button>
-            {popupImage && (
-              <img
-                src={popupImage.src}
-                alt={popupImage.alt}
-                className="w-full h-auto max-h-[85vh] object-contain rounded-lg"
-              />
-            )}
+            <img
+              src={popupImage.src}
+              alt={popupImage.alt}
+              className="w-full h-auto max-h-[85vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </div>
   )
 }
