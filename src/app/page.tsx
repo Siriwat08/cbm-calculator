@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 
-// Types
 interface OilPrice {
   date: string;
   price: number;
@@ -12,11 +11,7 @@ interface OilPrice {
 interface RateData {
   [key: string]: {
     oil_ranges: { min: number; max: number }[];
-    data: {
-      dist_min: number;
-      dist_max: number;
-      prices: number[];
-    }[];
+    data: { dist_min: number; dist_max: number; prices: number[] }[];
   };
 }
 
@@ -40,7 +35,6 @@ interface CargoItem {
   weight: number;
 }
 
-// Truck Data
 const truckTypes: TruckType[] = [
   {
     id: 'pickup',
@@ -60,7 +54,7 @@ const truckTypes: TruckType[] = [
     maxWeight: 3000,
     dimensions: { width: 1.80, length: 3.20, height: 2.10 },
     usableSpace: 100,
-    jobKey: 'จัมโบ้_PPY',
+    jobKey: '4จัมโบ้_PPY',
   },
   {
     id: '6wheel',
@@ -74,12 +68,10 @@ const truckTypes: TruckType[] = [
   },
 ];
 
-// Fallback oil price
-const FALLBACK_OIL_PRICE = 50.54;
+const FALLBACK_OIL_PRICE = 33.50;
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
-  
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
@@ -88,10 +80,7 @@ export default function Home() {
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
   const [distance, setDistance] = useState<string>('');
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
-  const [priceDetails, setPriceDetails] = useState<{
-    oilRange: string;
-    distRange: string;
-  } | null>(null);
+  const [priceDetails, setPriceDetails] = useState<{ oilRange: string; distRange: string } | null>(null);
   
   const [selectedTruck, setSelectedTruck] = useState(truckTypes[0]);
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([
@@ -103,39 +92,33 @@ export default function Home() {
   const [rateData, setRateData] = useState<RateData | null>(null);
   const [availableJobs, setAvailableJobs] = useState<string[]>([]);
 
-  // Load rate data
   useEffect(() => {
     fetch('/transport_rates.json')
-      .then((res) => res.json())
-      .then((data) => {
+      .then(res => res.json())
+      .then(data => {
         setRateData(data);
         const keys = Object.keys(data);
         setAvailableJobs(keys);
-        if (keys.length > 0) {
-          setSelectedJob(keys[0]);
-        }
+        if (keys.length > 0) setSelectedJob(keys[0]);
       })
-      .catch((err) => console.error('Failed to load rate data:', err));
+      .catch(() => console.error('Failed to load rate data'));
   }, []);
 
-  // Fetch oil price from API (with Upstash Redis)
   const fetchOilPrice = useCallback(async () => {
     setLoadingOil(true);
-    
     try {
       const res = await fetch('/api/oil-price');
       const data = await res.json();
       
-      if (data.price) {
+      if (data.price !== undefined && data.price !== null) {
         setCurrentOilPrice(data.price);
         setOilPriceSource(data.source || 'api');
-        
         if (data.history && data.history.length > 0) {
           setOilPriceHistory(data.history);
         }
       }
-    } catch (error) {
-      console.error('Failed to fetch oil price:', error);
+    } catch {
+      console.error('Failed to fetch oil price');
     } finally {
       setLoadingOil(false);
     }
@@ -145,75 +128,47 @@ export default function Home() {
     fetchOilPrice();
   }, [fetchOilPrice]);
 
-  // Calculate price
   useEffect(() => {
-    if (!rateData || !distance || !currentOilPrice) {
+    if (!rateData || !distance || currentOilPrice === null) {
       setCalculatedPrice(null);
       setPriceDetails(null);
       return;
     }
 
     const jobData = rateData[selectedJob];
-    if (!jobData) {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
-      return;
-    }
+    if (!jobData) return;
 
     const dist = parseFloat(distance);
-    if (isNaN(dist) || dist <= 0) {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
-      return;
-    }
-    
-    let oilIndex = -1;
-    for (let i = 0; i < jobData.oil_ranges.length; i++) {
-      const range = jobData.oil_ranges[i];
-      if (currentOilPrice >= range.min && currentOilPrice <= range.max) {
-        oilIndex = i;
-        break;
-      }
-    }
+    if (isNaN(dist) || dist <= 0) return;
 
-    if (oilIndex === -1) {
-      oilIndex = jobData.oil_ranges.length - 1;
-    }
+    let oilIndex = jobData.oil_ranges.findIndex(
+      range => currentOilPrice >= range.min && currentOilPrice <= range.max
+    );
+    if (oilIndex === -1) oilIndex = jobData.oil_ranges.length - 1;
 
     let distIndex = -1;
     let distRange = '';
     
-    if (jobData.data && jobData.data.length > 0) {
-      for (let i = 0; i < jobData.data.length; i++) {
-        const row = jobData.data[i];
-        if (dist >= row.dist_min && dist <= row.dist_max) {
-          distIndex = i;
-          distRange = `${row.dist_min} - ${row.dist_max} กม.`;
-          break;
-        }
-      }
-
-      if (distIndex === -1) {
-        if (dist < jobData.data[0].dist_min) {
-          distIndex = 0;
-          distRange = `0 - ${jobData.data[0].dist_max} กม.`;
-        } else {
-          distIndex = jobData.data.length - 1;
-          const lastRow = jobData.data[distIndex];
-          distRange = `${lastRow.dist_min}+ กม.`;
-        }
+    for (let i = 0; i < jobData.data.length; i++) {
+      const row = jobData.data[i];
+      if (dist >= row.dist_min && dist <= row.dist_max) {
+        distIndex = i;
+        distRange = `${row.dist_min} - ${row.dist_max} กม.`;
+        break;
       }
     }
+    
+    if (distIndex === -1) {
+      distIndex = jobData.data.length - 1;
+      distRange = `${jobData.data[distIndex].dist_min}+ กม.`;
+    }
 
-    if (distIndex >= 0 && jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
-      const price = jobData.data[distIndex].prices[oilIndex];
-      const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
-
-      setCalculatedPrice(price);
-      setPriceDetails({ oilRange, distRange });
-    } else {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
+    if (jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
+      setCalculatedPrice(jobData.data[distIndex].prices[oilIndex]);
+      setPriceDetails({
+        oilRange: `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`,
+        distRange
+      });
     }
   }, [rateData, selectedJob, distance, currentOilPrice]);
 
@@ -223,106 +178,61 @@ export default function Home() {
     setActiveTab('price');
   };
 
-  const calculateCBM = (item: CargoItem) => {
-    return ((item.width * item.length * item.height) / 1000000) * item.quantity;
-  };
+  const calculateCBM = (item: CargoItem) => 
+    ((item.width * item.length * item.height) / 1000000) * item.quantity;
 
   const totalCBM = cargoItems.reduce((sum, item) => sum + calculateCBM(item), 0);
   const totalWeight = cargoItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
 
   const canFitInTruck = (item: CargoItem, truck: TruckType) => {
-    const { width, length, height } = item;
-    const { width: tw, length: tl, height: th } = truck.dimensions;
+    const dims = [item.width, item.length, item.height];
+    const truckDims = [truck.dimensions.width * 100, truck.dimensions.length * 100, truck.dimensions.height * 100];
     
-    const rotations = [
-      [width, length, height],
-      [width, height, length],
-      [length, width, height],
-      [length, height, width],
-      [height, width, length],
-      [height, length, width],
-    ];
-
-    return rotations.some(([w, l, h]) => w <= tw * 100 && l <= tl * 100 && h <= th * 100);
+    for (let i = 0; i < 6; i++) {
+      const [w, l, h] = [
+        dims[i % 3], dims[(i + 1) % 3], dims[(i + 2) % 3]
+      ];
+      if (w <= truckDims[0] && l <= truckDims[1] && h <= truckDims[2]) return true;
+    }
+    return false;
   };
 
   const getOversizedDimensions = (item: CargoItem, truck: TruckType) => {
     const issues: string[] = [];
-    const { width, length, height } = item;
-    const { width: tw, length: tl, height: th } = truck.dimensions;
-
-    if (width > tw * 100 && width > tl * 100) issues.push(`กว้าง ${width} ซม.`);
-    if (length > tl * 100 && length > tw * 100) issues.push(`ยาว ${length} ซม.`);
-    if (height > th * 100) issues.push(`สูง ${height} ซม.`);
-
+    if (item.width > truck.dimensions.width * 100) issues.push(`กว้าง ${item.width} cm`);
+    if (item.length > truck.dimensions.length * 100) issues.push(`ยาว ${item.length} cm`);
+    if (item.height > truck.dimensions.height * 100) issues.push(`สูง ${item.height} cm`);
     return issues;
   };
 
-  const checkAllItemsFit = () => {
-    return cargoItems.every((item) => canFitInTruck(item, selectedTruck));
-  };
-
-  const getRecommendedTruck = () => {
-    for (const truck of truckTypes) {
-      const fits = cargoItems.every((item) => canFitInTruck(item, truck));
-      const cbmOk = totalCBM <= truck.cbm * (truck.usableSpace / 100);
-      const weightOk = totalWeight <= truck.maxWeight;
-
-      if (fits && cbmOk && weightOk) {
-        return truck;
-      }
-    }
-    return null;
-  };
-
-  const recommendedTruck = cargoItems.length > 0 && totalCBM > 0 ? getRecommendedTruck() : null;
-  const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
+  const allItemsValid = cargoItems.every(item => 
+    item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0
+  );
 
   const addCargoItem = () => {
-    setCargoItems([
-      ...cargoItems,
-      { id: Date.now().toString(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 },
-    ]);
+    setCargoItems([...cargoItems, { id: Date.now().toString(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
   };
 
   const removeCargoItem = (id: string) => {
     if (cargoItems.length > 1) {
-      setCargoItems(cargoItems.filter((item) => item.id !== id));
+      setCargoItems(cargoItems.filter(item => item.id !== id));
     }
   };
 
   const updateCargoItem = (id: string, field: keyof CargoItem, value: number) => {
-    setCargoItems(
-      cargoItems.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item
-      )
-    );
+    setCargoItems(cargoItems.map(item => item.id === id ? { ...item, [field]: value } : item));
   };
 
   const resetForm = () => {
-    setCargoItems([
-      { id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 },
-    ]);
+    setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
     setSelectedTruck(truckTypes[0]);
-  };
-
-  const openPopup = (image: string) => {
-    setPopupImage(image);
-    setShowPopup(true);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-      {/* Header */}
       <header className="bg-gradient-to-r from-blue-700 to-blue-900 text-white py-4 px-4 shadow-lg">
         <div className="max-w-4xl mx-auto flex items-center gap-4">
-          <Image
-            src="/images/3_20251016_054221_0002.png"
-            alt="เผ่าปัญญา ทรานสปอร์ต"
-            width={60}
-            height={60}
-            className="rounded-full"
-          />
+          <Image src="/images/3_20251016_054221_0002.png" alt="Logo" width={60} height={60} className="rounded-full" />
           <div>
             <h1 className="text-xl font-bold">หจก.เผ่าปัญญา ทรานสปอร์ต</h1>
             <p className="text-blue-200 text-sm">เครื่องมือช่วยคำนวณการขนส่ง</p>
@@ -330,87 +240,34 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Tab Navigation */}
       <div className="max-w-4xl mx-auto px-4 pt-4">
         <div className="flex gap-2 bg-white rounded-lg shadow p-1">
-          <button
-            onClick={() => setActiveTab('cbm')}
-            className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-              activeTab === 'cbm'
-                ? 'bg-blue-600 text-white shadow'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
+          <button onClick={() => setActiveTab('cbm')} className={`flex-1 py-3 px-4 rounded-lg font-medium ${activeTab === 'cbm' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
             📦 คำนวณ CBM
           </button>
-          <button
-            onClick={() => setActiveTab('price')}
-            className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-              activeTab === 'price'
-                ? 'bg-blue-600 text-white shadow'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
+          <button onClick={() => setActiveTab('price')} className={`flex-1 py-3 px-4 rounded-lg font-medium ${activeTab === 'price' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
             💰 คำนวณราคา
           </button>
         </div>
       </div>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* CBM Calculator Tab */}
         {activeTab === 'cbm' && (
           <div className="space-y-6">
-            {/* Truck Selection */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">🚛 เลือกประเภทรถ</h2>
-                <p className="text-blue-100 text-sm">เลือกรถแล้วกด &quot;คำนวณราคา&quot; เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
               </div>
-              
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                {truckTypes.map((truck) => (
-                  <div
-                    key={truck.id}
-                    className={`rounded-xl border-2 transition-all ${
-                      selectedTruck.id === truck.id
-                        ? 'border-blue-500 bg-blue-50 shadow-lg'
-                        : 'border-gray-200 hover:border-blue-300'
-                    }`}
-                  >
-                    <div 
-                      className="relative h-48 overflow-hidden rounded-t-xl cursor-pointer"
-                      onClick={() => setSelectedTruck(truck)}
-                    >
-                      <Image
-                        src={truck.image}
-                        alt={truck.name}
-                        fill
-                        className="object-cover object-top"
-                        style={{ objectPosition: 'top' }}
-                      />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openPopup(truck.image);
-                        }}
-                        className="absolute bottom-2 left-2 bg-white text-blue-600 text-xs px-2 py-1 rounded shadow hover:bg-blue-50"
-                      >
-                        กดเพื่อดูข้อมูลเพิ่มเติม
-                      </button>
-                      {selectedTruck.id === truck.id && (
-                        <div className="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-1">
-                          ✓
-                        </div>
-                      )}
+                {truckTypes.map(truck => (
+                  <div key={truck.id} onClick={() => setSelectedTruck(truck)} className={`rounded-xl border-2 cursor-pointer ${selectedTruck.id === truck.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`}>
+                    <div className="relative h-48 overflow-hidden">
+                      <Image src={truck.image} alt={truck.name} fill className="object-cover object-top" />
                     </div>
                     <div className="p-3">
-                      <h3 className="font-bold text-gray-800">{truck.name}</h3>
-                      <p className="text-sm text-gray-600">CBM: {truck.cbm} | น้ำหนัก: {truck.maxWeight.toLocaleString()} kg</p>
-                      
-                      <button
-                        onClick={() => goToPriceCalculator(truck)}
-                        className="mt-2 w-full py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-medium hover:from-green-600 hover:to-green-700 transition text-sm"
-                      >
+                      <h3 className="font-bold">{truck.name}</h3>
+                      <p className="text-sm text-gray-600">CBM: {truck.cbm} | {truck.maxWeight.toLocaleString()} kg</p>
+                      <button onClick={(e) => { e.stopPropagation(); goToPriceCalculator(truck); }} className="mt-2 w-full py-2 bg-green-500 text-white rounded-lg text-sm">
                         💰 คำนวณราคา
                       </button>
                     </div>
@@ -419,394 +276,126 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Cargo Items */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
+              <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between">
                 <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-                <button
-                  onClick={addCargoItem}
-                  className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
-                >
-                  + เพิ่มรายการ
-                </button>
+                <button onClick={addCargoItem} className="bg-white text-orange-600 px-3 py-1 rounded-lg text-sm">+ เพิ่ม</button>
               </div>
-              
               <div className="p-4 space-y-4">
                 {cargoItems.map((item, index) => (
                   <div key={item.id} className="bg-gray-50 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-3">
-                      <span className="font-medium text-gray-700">รายการ {index + 1}</span>
-                      {cargoItems.length > 1 && (
-                        <button
-                          onClick={() => removeCargoItem(item.id)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          ✕ ลบ
-                        </button>
-                      )}
+                    <div className="flex justify-between mb-3">
+                      <span className="font-medium">รายการ {index + 1}</span>
+                      {cargoItems.length > 1 && <button onClick={() => removeCargoItem(item.id)} className="text-red-500">✕</button>}
                     </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                      <div>
-                        <label className="text-xs text-gray-500">กว้าง (ซม.) *</label>
-                        <input
-                          type="number"
-                          value={item.width || ''}
-                          onChange={(e) => updateCargoItem(item.id, 'width', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500">ยาว (ซม.) *</label>
-                        <input
-                          type="number"
-                          value={item.length || ''}
-                          onChange={(e) => updateCargoItem(item.id, 'length', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500">สูง (ซม.) *</label>
-                        <input
-                          type="number"
-                          value={item.height || ''}
-                          onChange={(e) => updateCargoItem(item.id, 'height', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500">จำนวน</label>
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                          className="w-full border rounded px-2 py-1"
-                          min="1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-gray-500">น้ำหนัก (kg) *</label>
-                        <input
-                          type="number"
-                          value={item.weight || ''}
-                          onChange={(e) => updateCargoItem(item.id, 'weight', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
-                        />
-                      </div>
+                    <div className="grid grid-cols-5 gap-3">
+                      {['width', 'length', 'height', 'quantity', 'weight'].map((field, i) => (
+                        <div key={field}>
+                          <label className="text-xs text-gray-500">{['กว้าง', 'ยาว', 'สูง', 'จำนวน', 'น้ำหนัก'][i]} *</label>
+                          <input type="number" value={item[field as keyof CargoItem] || ''} onChange={e => updateCargoItem(item.id, field as keyof CargoItem, parseFloat(e.target.value) || 0)} className="w-full border rounded px-2 py-1" />
+                        </div>
+                      ))}
                     </div>
-                    
                     {item.width > 0 && item.length > 0 && item.height > 0 && (
-                      <p className="text-sm text-blue-600 mt-2">
-                        CBM: {calculateCBM(item).toFixed(4)} m³
-                      </p>
+                      <p className="text-sm text-blue-600 mt-2">CBM: {calculateCBM(item).toFixed(4)} m³</p>
                     )}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Results */}
             {totalCBM > 0 && (
-              <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-                <div className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-6 py-4">
-                  <h2 className="text-lg font-bold">📊 ผลการตรวจสอบ</h2>
-                </div>
-                
-                <div className="p-6 space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-blue-50 rounded-lg p-4 text-center">
-                      <p className="text-gray-600 text-sm">ปริมาตรรวม</p>
-                      <p className="text-2xl font-bold text-blue-600">{totalCBM.toFixed(4)} m³</p>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-4 text-center">
-                      <p className="text-gray-600 text-sm">น้ำหนักรวม</p>
-                      <p className="text-2xl font-bold text-orange-600">{totalWeight.toLocaleString()} kg</p>
-                    </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h3 className="font-bold mb-4">📊 ผลการตรวจสอบ</h3>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="bg-blue-50 p-4 rounded text-center">
+                    <p className="text-gray-600 text-sm">ปริมาตร</p>
+                    <p className="text-2xl font-bold text-blue-600">{totalCBM.toFixed(4)} m³</p>
                   </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>การใช้พื้นที่</span>
-                        <span>{((totalCBM / (selectedTruck.cbm * selectedTruck.usableSpace / 100)) * 100).toFixed(1)}%</span>
-                      </div>
-                      <div className="bg-gray-200 rounded-full h-3">
-                        <div
-                          className={`h-3 rounded-full ${
-                            totalCBM > selectedTruck.cbm * selectedTruck.usableSpace / 100
-                              ? 'bg-red-500'
-                              : 'bg-green-500'
-                          }`}
-                          style={{
-                            width: `${Math.min(
-                              (totalCBM / (selectedTruck.cbm * selectedTruck.usableSpace / 100)) * 100,
-                              100
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>การใช้น้ำหนัก</span>
-                        <span>{((totalWeight / selectedTruck.maxWeight) * 100).toFixed(1)}%</span>
-                      </div>
-                      <div className="bg-gray-200 rounded-full h-3">
-                        <div
-                          className={`h-3 rounded-full ${
-                            totalWeight > selectedTruck.maxWeight ? 'bg-red-500' : 'bg-blue-500'
-                          }`}
-                          style={{
-                            width: `${Math.min((totalWeight / selectedTruck.maxWeight) * 100, 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
+                  <div className="bg-orange-50 p-4 rounded text-center">
+                    <p className="text-gray-600 text-sm">น้ำหนัก</p>
+                    <p className="text-2xl font-bold text-orange-600">{totalWeight.toLocaleString()} kg</p>
                   </div>
-
-                  {!allItemsValid && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-yellow-800">
-                      ⚠️ กรุณากรอกข้อมูลให้ครบทุกช่อง
-                    </div>
-                  )}
-
-                  {allItemsValid && !checkAllItemsFit() && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                      <p className="text-red-800 font-medium">❌ สินค้ามีขนาดใหญ่เกินไป</p>
-                      <ul className="text-sm text-red-600 mt-1">
-                        {cargoItems.map((item, idx) => {
-                          const issues = getOversizedDimensions(item, selectedTruck);
-                          return issues.length > 0 ? (
-                            <li key={item.id}>รายการ {idx + 1}: {issues.join(', ')}</li>
-                          ) : null;
-                        })}
-                      </ul>
-                    </div>
-                  )}
-
-                  {allItemsValid && checkAllItemsFit() && totalCBM <= selectedTruck.cbm * selectedTruck.usableSpace / 100 && totalWeight <= selectedTruck.maxWeight && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                      <p className="text-green-800 font-bold text-lg">✅ ใส่รถ {selectedTruck.name} ได้!</p>
-                    </div>
-                  )}
-
-                  {recommendedTruck && recommendedTruck.id !== selectedTruck.id && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <p className="text-blue-800 font-medium">
-                        💡 แนะนำ: {recommendedTruck.name}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <button
-                    onClick={() => goToPriceCalculator(selectedTruck)}
-                    className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-bold hover:from-green-600 hover:to-green-700 transition"
-                  >
-                    💰 ไปคำนวณราคาค่าขนส่ง
-                  </button>
                 </div>
+                {!allItemsValid && <p className="text-yellow-700">⚠️ กรุณากรอกข้อมูลให้ครบ</p>}
+                {allItemsValid && !cargoItems.every(i => canFitInTruck(i, selectedTruck)) && (
+                  <p className="text-red-700">❌ สินค้ามีขนาดใหญ่เกินไป</p>
+                )}
+                {allItemsValid && cargoItems.every(i => canFitInTruck(i, selectedTruck)) && totalCBM <= selectedTruck.cbm * 0.8 && totalWeight <= selectedTruck.maxWeight && (
+                  <p className="text-green-700">✅ ใส่รถ {selectedTruck.name} ได้!</p>
+                )}
               </div>
             )}
 
-            <button
-              onClick={resetForm}
-              className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300"
-            >
-              🔄 รีเซ็ตข้อมูล
-            </button>
+            <button onClick={resetForm} className="w-full py-3 bg-gray-200 rounded-lg">🔄 รีเซ็ต</button>
           </div>
         )}
 
-        {/* Price Calculator Tab */}
         {activeTab === 'price' && (
           <div className="space-y-6">
-            {/* Oil Price Card */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
-                </h2>
-                <div className="flex items-center gap-2 text-green-100 text-sm">
-                  <span>อ้างอิง: ปตท.</span>
-                  {oilPriceSource && (
-                    <span className="bg-green-700 px-2 py-0.5 rounded text-xs">
-                      {oilPriceSource === 'ptt-api' ? '🔴 Live' : 
-                       oilPriceSource === 'cache' ? '💾 Cache' : '📁 Fallback'}
-                    </span>
-                  )}
-                </div>
+                <h2 className="text-lg font-bold">⛽ ราคาน้ำมันดีเซล</h2>
+                <span className="text-xs bg-green-700 px-2 py-0.5 rounded">{oilPriceSource || 'loading'}</span>
               </div>
-              
               <div className="p-4">
                 {loadingOil ? (
                   <div className="text-center py-4">
                     <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-                    <p className="text-gray-500 mt-2">กำลังโหลดราคาน้ำมัน...</p>
+                    <p className="text-gray-500 mt-2">กำลังโหลด...</p>
                   </div>
                 ) : oilPriceHistory.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="bg-gray-50">
-                          <th className="text-left py-2 px-3 text-gray-600 font-medium">วันที่ปรับราคา</th>
-                          <th className="text-right py-2 px-3 text-gray-600 font-medium">ราคา (บาท)</th>
+                  <table className="w-full">
+                    <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3">วันที่</th><th className="text-right py-2 px-3">ราคา (บาท)</th></tr></thead>
+                    <tbody>
+                      {oilPriceHistory.map((item, i) => (
+                        <tr key={item.date} className={`border-b ${i === 0 ? 'bg-blue-50 font-bold' : ''}`}>
+                          <td className="py-2 px-3">{item.date} {i === 0 && <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">ใช้คำนวณ</span>}</td>
+                          <td className="py-2 px-3 text-right">{item.price.toFixed(2)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {oilPriceHistory.map((item, index) => (
-                          <tr
-                            key={item.date}
-                            className={`border-b ${
-                              index === 0 ? 'bg-blue-50 font-bold' : ''
-                            }`}
-                          >
-                            <td className="py-2 px-3 text-gray-700">
-                              {item.date}
-                              {index === 0 && (
-                                <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                                  ใช้คำนวณ
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-right text-gray-900">
-                              {item.price.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 ) : (
                   <div className="text-center py-4">
-                    <p className="text-gray-600 mb-2">ราคาน้ำมันดีเซล</p>
                     <p className="text-3xl font-bold text-orange-600">{currentOilPrice.toFixed(2)} บาท</p>
-                    <p className="text-sm text-orange-500 mt-2">
-                      ⚠️ ใช้ข้อมูลประมาณการ
-                    </p>
-                    <button 
-                      onClick={() => fetchOilPrice()}
-                      className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
-                    >
-                      🔄 ลองโหลดใหม่
-                    </button>
+                    <button onClick={fetchOilPrice} className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm">🔄 โหลดใหม่</button>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Price Calculator Card */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
-                <h2 className="text-lg font-bold">🧮 คำนวณราคาค่าขนส่ง</h2>
-                <p className="text-blue-100 text-sm">ประเภทรถ: {selectedTruck.name}</p>
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="font-bold mb-4">🧮 คำนวณราคาค่าขนส่ง</h3>
+              <select value={selectedJob} onChange={e => setSelectedJob(e.target.value)} className="w-full border-2 rounded-lg px-4 py-3 mb-4">
+                {availableJobs.map(job => <option key={job} value={job}>{job}</option>)}
+              </select>
+              <div className="flex gap-2 mb-4">
+                <input type="number" value={distance} onChange={e => setDistance(e.target.value)} placeholder="ระยะทาง" className="flex-1 border-2 rounded-lg px-4 py-3" />
+                <span className="text-gray-600 self-center">กม.</span>
               </div>
-              
-              <div className="p-6 space-y-6">
-                <div>
-                  <label className="block text-gray-700 font-medium mb-2">
-                    ประเภทงาน <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={selectedJob}
-                    onChange={(e) => setSelectedJob(e.target.value)}
-                    className="w-full border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
-                  >
-                    {availableJobs.map((job) => (
-                      <option key={job} value={job}>{job}</option>
-                    ))}
-                  </select>
+              {calculatedPrice !== null && priceDetails && (
+                <div className="bg-blue-50 rounded-xl p-6 text-center">
+                  <p className="text-4xl font-bold text-blue-600">฿{calculatedPrice.toLocaleString()}</p>
+                  <p className="text-sm text-gray-500 mt-2">น้ำมัน: {priceDetails.oilRange} | ระยะทาง: {priceDetails.distRange}</p>
                 </div>
-
-                <div>
-                  <label className="block text-gray-700 font-medium mb-2">
-                    ระยะทาง <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={distance}
-                      onChange={(e) => setDistance(e.target.value)}
-                      placeholder="กรอกระยะทาง"
-                      className="flex-1 border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
-                    />
-                    <span className="text-gray-600 font-medium">กม.</span>
-                  </div>
-                </div>
-
-                {calculatedPrice !== null && priceDetails ? (
-                  <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border-2 border-blue-200">
-                    <div className="text-center">
-                      <p className="text-gray-600 mb-2">ราคาค่าขนส่ง</p>
-                      <p className="text-4xl font-bold text-blue-600">
-                        ฿{calculatedPrice.toLocaleString()}
-                      </p>
-                      <div className="mt-4 text-sm text-gray-500 space-y-1">
-                        <p>ช่วงราคาน้ำมัน: {priceDetails.oilRange}</p>
-                        <p>ช่วงระยะทาง: {priceDetails.distRange}</p>
-                        <p>ราคาน้ำมันที่ใช้: {currentOilPrice.toFixed(2)} บาท</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : distance && !rateData ? (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
-                    ⚠️ กำลังโหลดข้อมูลราคา...
-                  </div>
-                ) : distance && rateData && !calculatedPrice ? (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-                    ❌ ไม่พบราคาสำหรับระยะทาง {distance} กม.
-                  </div>
-                ) : null}
-              </div>
+              )}
             </div>
-            
-            <button
-              onClick={() => setActiveTab('cbm')}
-              className="w-full py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
-            >
-              📦 กลับไปคำนวณ CBM
-            </button>
+
+            <button onClick={() => setActiveTab('cbm')} className="w-full py-3 bg-gray-200 rounded-lg">📦 กลับไปคำนวณ CBM</button>
           </div>
         )}
       </main>
 
-      {/* Image Popup */}
       {showPopup && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowPopup(false)}
-        >
-          <div className="relative max-w-4xl max-h-[90vh]">
-            <button
-              onClick={() => setShowPopup(false)}
-              className="absolute -top-10 right-0 text-white text-3xl hover:text-gray-300"
-            >
-              ✕
-            </button>
-            <Image
-              src={popupImage}
-              alt="Truck Image"
-              width={800}
-              height={600}
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            />
-          </div>
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50" onClick={() => setShowPopup(false)}>
+          <Image src={popupImage} alt="Truck" width={800} height={600} className="max-w-full max-h-[80vh] rounded-lg" />
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="bg-gray-800 text-white py-6 px-4 mt-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <Image
-            src="/images/3_20251016_054221_0002.png"
-            alt="เผ่าปัญญา ทรานสปอร์ต"
-            width={50}
-            height={50}
-            className="mx-auto rounded-full mb-2"
-          />
-          <p className="font-bold">หจก.เผ่าปัญญา ทรานสปอร์ต</p>
-          <p className="text-gray-400 text-sm mt-1">สงวนลิขสิทธิ์ © {new Date().getFullYear()}</p>
-        </div>
+      <footer className="bg-gray-800 text-white py-6 px-4 mt-8 text-center">
+        <p className="font-bold">หจก.เผ่าปัญญา ทรานสปอร์ต</p>
+        <p className="text-gray-400 text-sm">© {new Date().getFullYear()}</p>
       </footer>
     </div>
   );
