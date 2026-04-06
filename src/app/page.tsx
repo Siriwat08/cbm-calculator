@@ -28,7 +28,7 @@ interface TruckType {
   maxWeight: number;
   dimensions: { width: number; length: number; height: number };
   usableSpace: number;
-  jobKey: string; // Key for rate data
+  jobKey: string;
 }
 
 interface CargoItem {
@@ -40,7 +40,7 @@ interface CargoItem {
   weight: number;
 }
 
-// Truck Data with job key mapping
+// Truck Data
 const truckTypes: TruckType[] = [
   {
     id: 'pickup',
@@ -74,19 +74,17 @@ const truckTypes: TruckType[] = [
   },
 ];
 
-// Fallback oil price (update manually when needed)
+// Fallback oil price
 const FALLBACK_OIL_PRICE = 50.54;
 
 export default function Home() {
-  // Tab State - Default to CBM
   const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
   
-  // Oil Price State
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
+  const [oilPriceSource, setOilPriceSource] = useState<string>('');
   
-  // Price Calculator State
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
   const [distance, setDistance] = useState<string>('');
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
@@ -95,7 +93,6 @@ export default function Home() {
     distRange: string;
   } | null>(null);
   
-  // CBM Calculator State
   const [selectedTruck, setSelectedTruck] = useState(truckTypes[0]);
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([
     { id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 },
@@ -103,7 +100,6 @@ export default function Home() {
   const [showPopup, setShowPopup] = useState(false);
   const [popupImage, setPopupImage] = useState('');
   
-  // Rate Data
   const [rateData, setRateData] = useState<RateData | null>(null);
   const [availableJobs, setAvailableJobs] = useState<string[]>([]);
 
@@ -112,9 +108,7 @@ export default function Home() {
     fetch('/transport_rates.json')
       .then((res) => res.json())
       .then((data) => {
-        console.log('Rate data loaded:', data);
         setRateData(data);
-        // Get available job keys
         const keys = Object.keys(data);
         setAvailableJobs(keys);
         if (keys.length > 0) {
@@ -124,7 +118,7 @@ export default function Home() {
       .catch((err) => console.error('Failed to load rate data:', err));
   }, []);
 
-  // Fetch oil price
+  // Fetch oil price from API (with Upstash Redis)
   const fetchOilPrice = useCallback(async () => {
     setLoadingOil(true);
     
@@ -134,33 +128,14 @@ export default function Home() {
       
       if (data.price) {
         setCurrentOilPrice(data.price);
+        setOilPriceSource(data.source || 'api');
         
-        // Save to history (localStorage)
-        const savedHistory = localStorage.getItem('oilPriceHistory');
-        let history: OilPrice[] = savedHistory ? JSON.parse(savedHistory) : [];
-        
-        // Check if this date already exists
-        const exists = history.some((h) => h.date === data.date);
-        if (!exists) {
-          history.unshift({ date: data.date, price: data.price });
-          history = history.slice(0, 5);
-          localStorage.setItem('oilPriceHistory', JSON.stringify(history));
+        if (data.history && data.history.length > 0) {
+          setOilPriceHistory(data.history);
         }
-        
-        setOilPriceHistory(history);
       }
     } catch (error) {
       console.error('Failed to fetch oil price:', error);
-      
-      // Use localStorage as fallback
-      const savedHistory = localStorage.getItem('oilPriceHistory');
-      if (savedHistory) {
-        const history: OilPrice[] = JSON.parse(savedHistory);
-        if (history.length > 0) {
-          setCurrentOilPrice(history[0].price);
-          setOilPriceHistory(history);
-        }
-      }
     } finally {
       setLoadingOil(false);
     }
@@ -170,15 +145,8 @@ export default function Home() {
     fetchOilPrice();
   }, [fetchOilPrice]);
 
-  // Calculate price when inputs change
+  // Calculate price
   useEffect(() => {
-    console.log('Calculating price...', { 
-      rateData: !!rateData, 
-      distance, 
-      currentOilPrice, 
-      selectedJob 
-    });
-    
     if (!rateData || !distance || !currentOilPrice) {
       setCalculatedPrice(null);
       setPriceDetails(null);
@@ -187,7 +155,6 @@ export default function Home() {
 
     const jobData = rateData[selectedJob];
     if (!jobData) {
-      console.error('Job not found:', selectedJob, 'Available:', Object.keys(rateData));
       setCalculatedPrice(null);
       setPriceDetails(null);
       return;
@@ -200,11 +167,6 @@ export default function Home() {
       return;
     }
     
-    console.log('Job data:', jobData);
-    console.log('Oil ranges:', jobData.oil_ranges);
-    console.log('Distance rows:', jobData.data?.length);
-    
-    // Find oil price range
     let oilIndex = -1;
     for (let i = 0; i < jobData.oil_ranges.length; i++) {
       const range = jobData.oil_ranges[i];
@@ -214,12 +176,10 @@ export default function Home() {
       }
     }
 
-    // If not found, use last range
     if (oilIndex === -1) {
       oilIndex = jobData.oil_ranges.length - 1;
     }
 
-    // Find distance range
     let distIndex = -1;
     let distRange = '';
     
@@ -249,24 +209,20 @@ export default function Home() {
       const price = jobData.data[distIndex].prices[oilIndex];
       const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
 
-      console.log('Price calculated:', price);
       setCalculatedPrice(price);
       setPriceDetails({ oilRange, distRange });
     } else {
-      console.error('Could not find price at distIndex:', distIndex, 'oilIndex:', oilIndex);
       setCalculatedPrice(null);
       setPriceDetails(null);
     }
   }, [rateData, selectedJob, distance, currentOilPrice]);
 
-  // Navigate to price calculator with selected truck
   const goToPriceCalculator = (truck: TruckType) => {
     setSelectedTruck(truck);
     setSelectedJob(truck.jobKey);
     setActiveTab('price');
   };
 
-  // CBM Calculations
   const calculateCBM = (item: CargoItem) => {
     return ((item.width * item.length * item.height) / 1000000) * item.quantity;
   };
@@ -401,14 +357,14 @@ export default function Home() {
       </div>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* CBM Calculator Tab - DEFAULT */}
+        {/* CBM Calculator Tab */}
         {activeTab === 'cbm' && (
           <div className="space-y-6">
             {/* Truck Selection */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">🚛 เลือกประเภทรถ</h2>
-                <p className="text-blue-100 text-sm">เลือกรถแล้วกด "คำนวณราคา" เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
+                <p className="text-blue-100 text-sm">เลือกรถแล้วกด &quot;คำนวณราคา&quot; เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
               </div>
               
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -451,7 +407,6 @@ export default function Home() {
                       <h3 className="font-bold text-gray-800">{truck.name}</h3>
                       <p className="text-sm text-gray-600">CBM: {truck.cbm} | น้ำหนัก: {truck.maxWeight.toLocaleString()} kg</p>
                       
-                      {/* Go to Price Calculator Button */}
                       <button
                         onClick={() => goToPriceCalculator(truck)}
                         className="mt-2 w-full py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-medium hover:from-green-600 hover:to-green-700 transition text-sm"
@@ -558,7 +513,6 @@ export default function Home() {
                 </div>
                 
                 <div className="p-6 space-y-4">
-                  {/* Summary */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-blue-50 rounded-lg p-4 text-center">
                       <p className="text-gray-600 text-sm">ปริมาตรรวม</p>
@@ -570,7 +524,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Capacity Bars */}
                   <div className="space-y-3">
                     <div>
                       <div className="flex justify-between text-sm mb-1">
@@ -612,7 +565,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Validation Messages */}
                   {!allItemsValid && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-yellow-800">
                       ⚠️ กรุณากรอกข้อมูลให้ครบทุกช่อง
@@ -647,7 +599,6 @@ export default function Home() {
                     </div>
                   )}
                   
-                  {/* Button to go to price calculator */}
                   <button
                     onClick={() => goToPriceCalculator(selectedTruck)}
                     className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-bold hover:from-green-600 hover:to-green-700 transition"
@@ -658,7 +609,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Reset Button */}
             <button
               onClick={resetForm}
               className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300"
@@ -677,7 +627,15 @@ export default function Home() {
                 <h2 className="text-lg font-bold flex items-center gap-2">
                   ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
                 </h2>
-                <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
+                <div className="flex items-center gap-2 text-green-100 text-sm">
+                  <span>อ้างอิง: ปตท.</span>
+                  {oilPriceSource && (
+                    <span className="bg-green-700 px-2 py-0.5 rounded text-xs">
+                      {oilPriceSource === 'ptt-api' ? '🔴 Live' : 
+                       oilPriceSource === 'cache' ? '💾 Cache' : '📁 Fallback'}
+                    </span>
+                  )}
+                </div>
               </div>
               
               <div className="p-4">
@@ -745,7 +703,6 @@ export default function Home() {
               </div>
               
               <div className="p-6 space-y-6">
-                {/* Job Selection */}
                 <div>
                   <label className="block text-gray-700 font-medium mb-2">
                     ประเภทงาน <span className="text-red-500">*</span>
@@ -761,7 +718,6 @@ export default function Home() {
                   </select>
                 </div>
 
-                {/* Distance Input */}
                 <div>
                   <label className="block text-gray-700 font-medium mb-2">
                     ระยะทาง <span className="text-red-500">*</span>
@@ -778,7 +734,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Result */}
                 {calculatedPrice !== null && priceDetails ? (
                   <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border-2 border-blue-200">
                     <div className="text-center">
@@ -800,14 +755,11 @@ export default function Home() {
                 ) : distance && rateData && !calculatedPrice ? (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
                     ❌ ไม่พบราคาสำหรับระยะทาง {distance} กม.
-                    <br />
-                    <span className="text-sm">หรือข้อมูลอัตราค่าขนส่งไม่ครบถ้วน</span>
                   </div>
                 ) : null}
               </div>
             </div>
             
-            {/* Back to CBM Button */}
             <button
               onClick={() => setActiveTab('cbm')}
               className="w-full py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
