@@ -3,61 +3,37 @@ import { getOilPriceHistory, saveOilPrice, setCurrentOilPrice } from '@/lib/kv';
 
 export async function GET() {
   try {
-    // PTT SOAP API
-    const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <CurrentOilPrice xmlns="http://www.pttor.com">
-      <Language>th</Language>
-    </CurrentOilPrice>
-  </soap:Body>
-</soap:Envelope>`;
-
     let oilPrice = null;
     let oilDate = null;
     
+    // Try Bangchak API (easier than PTT SOAP)
     try {
-      const response = await fetch('https://orapiweb.pttor.com/oilservice/OilPrice.asmx', {
-        method: 'POST',
+      const response = await fetch('https://oil-price.bangchak.co.th/ApiGetOilPrice/GetOilPrice', {
+        method: 'GET',
         headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': 'https://orapiweb.pttor.com/CurrentOilPrice',
+          'Accept': 'application/json',
         },
-        body: soapEnvelope,
       });
 
       if (response.ok) {
-        const xmlText = await response.text();
-        const resultMatch = xmlText.match(/<CurrentOilPriceResult[^>]*>([\s\S]*?)<\/CurrentOilPriceResult>/);
+        const data = await response.json();
+        const oilList = JSON.parse(data.OilList || '[]');
         
-        if (resultMatch) {
-          let jsonStr = resultMatch[1]
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&')
-            .replace(/&quot;/g, '"')
-            .trim();
-
-          const oilData = JSON.parse(jsonStr);
-          
-          let diesel = null;
-          if (Array.isArray(oilData)) {
-            diesel = oilData.find((item: { PRODUCT?: string }) => 
-              item.PRODUCT?.includes('ดีเซล') || item.PRODUCT?.includes('Diesel')
-            );
-          }
-
-          if (diesel) {
-            oilPrice = parseFloat(diesel.PRICE || diesel.Price || 0);
-            oilDate = diesel.PRICE_DATE || diesel.UpdateDate || new Date().toLocaleDateString('th-TH');
-          }
+        // Find Hi-Diesel S
+        const diesel = oilList.find((oil: { OilName: string }) => 
+          oil.OilName === 'ไฮดีเซล S' || oil.OilName.includes('ดีเซล')
+        );
+        
+        if (diesel) {
+          oilPrice = diesel.PriceToday;
+          oilDate = data.OilPriceDate;
         }
       }
     } catch (apiError) {
-      console.error('PTT API Error:', apiError);
+      console.error('Bangchak API Error:', apiError);
     }
 
-    // Get history from KV
+    // Get history from Redis
     const history = await getOilPriceHistory();
     
     // If we got new price from API, save it
@@ -69,11 +45,11 @@ export async function GET() {
         date: oilDate,
         price: oilPrice,
         history: newHistory,
-        source: 'ptt-api',
+        source: 'bangchak-api',
       });
     }
     
-    // If API failed, return history from KV
+    // If API failed, return history from Redis
     if (history.length > 0) {
       return NextResponse.json({
         date: history[0].date,
@@ -85,8 +61,9 @@ export async function GET() {
     
     // Fallback
     return NextResponse.json({
-      error: 'Could not fetch oil price',
+      error: 'Could not fetch oil price from API',
       history: [],
+      source: 'fallback',
     });
 
   } catch (error) {
