@@ -70,6 +70,9 @@ const truckTypes: TruckType[] = [
   },
 ];
 
+// Fallback oil price
+const FALLBACK_OIL_PRICE = 50.54;
+
 export default function Home() {
   // Tab State
   const [activeTab, setActiveTab] = useState<'price' | 'cbm'>('price');
@@ -78,6 +81,7 @@ export default function Home() {
   const [currentOilPrice, setCurrentOilPrice] = useState<number | null>(null);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
   
   // Price Calculator State
   const [selectedJob, setSelectedJob] = useState('4ล้อ_PPY');
@@ -109,6 +113,9 @@ export default function Home() {
 
   // Fetch oil price
   const fetchOilPrice = useCallback(async () => {
+    setLoadingOil(true);
+    setApiError(null);
+    
     try {
       const res = await fetch('/api/oil-price');
       const data = await res.json();
@@ -130,9 +137,33 @@ export default function Home() {
         }
         
         setOilPriceHistory(history);
+      } else if (data.error) {
+        console.error('API Error:', data.error);
+        setApiError(data.error);
+        
+        // Use localStorage as fallback
+        const savedHistory = localStorage.getItem('oilPriceHistory');
+        if (savedHistory) {
+          const history: OilPrice[] = JSON.parse(savedHistory);
+          if (history.length > 0) {
+            setCurrentOilPrice(history[0].price);
+            setOilPriceHistory(history);
+          }
+        }
       }
-    } catch {
-      console.error('Failed to fetch oil price');
+    } catch (error) {
+      console.error('Failed to fetch oil price:', error);
+      setApiError('ไม่สามารถเชื่อมต่อ API ได้');
+      
+      // Use localStorage as fallback
+      const savedHistory = localStorage.getItem('oilPriceHistory');
+      if (savedHistory) {
+        const history: OilPrice[] = JSON.parse(savedHistory);
+        if (history.length > 0) {
+          setCurrentOilPrice(history[0].price);
+          setOilPriceHistory(history);
+        }
+      }
     } finally {
       setLoadingOil(false);
     }
@@ -140,12 +171,6 @@ export default function Home() {
 
   useEffect(() => {
     fetchOilPrice();
-    
-    // Load history from localStorage
-    const savedHistory = localStorage.getItem('oilPriceHistory');
-    if (savedHistory) {
-      setOilPriceHistory(JSON.parse(savedHistory));
-    }
   }, [fetchOilPrice]);
 
   // Calculate price
@@ -303,6 +328,9 @@ export default function Home() {
     setShowPopup(true);
   };
 
+  // Get display price (current or fallback)
+  const displayPrice = currentOilPrice || FALLBACK_OIL_PRICE;
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       {/* Header */}
@@ -367,7 +395,7 @@ export default function Home() {
                     <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
                     <p className="text-gray-500 mt-2">กำลังโหลดราคาน้ำมัน...</p>
                   </div>
-                ) : (
+                ) : oilPriceHistory.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -397,21 +425,27 @@ export default function Home() {
                             </td>
                           </tr>
                         ))}
-                        {oilPriceHistory.length === 0 && currentOilPrice && (
-                          <tr className="bg-blue-50 font-bold">
-                            <td className="py-2 px-3 text-gray-700">
-                              วันนี้
-                              <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                                ใช้คำนวณ
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 text-right text-gray-900">
-                              {currentOilPrice.toFixed(2)}
-                            </td>
-                          </tr>
-                        )}
                       </tbody>
                     </table>
+                    {apiError && (
+                      <p className="text-xs text-orange-500 mt-2 text-center">
+                        ⚠️ {apiError} (ใช้ข้อมูลที่บันทึกไว้)
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-gray-600 mb-2">ราคาน้ำมันดีเซล</p>
+                    <p className="text-3xl font-bold text-orange-600">{displayPrice.toFixed(2)} บาท</p>
+                    <p className="text-sm text-orange-500 mt-2">
+                      ⚠️ ใช้ข้อมูลประมาณการ
+                    </p>
+                    <button 
+                      onClick={() => fetchOilPrice()}
+                      className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
+                    >
+                      🔄 ลองโหลดใหม่
+                    </button>
                   </div>
                 )}
               </div>
