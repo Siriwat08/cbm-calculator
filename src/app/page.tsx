@@ -60,7 +60,7 @@ const truckTypes: TruckType[] = [
     maxWeight: 3000,
     dimensions: { width: 1.80, length: 3.20, height: 2.10 },
     usableSpace: 100,
-    jobKey: 'จัมโบ้_PPY',
+    jobKey: '4จัมโบ้_PPY',
   },
   {
     id: '6wheel',
