@@ -28,6 +28,7 @@ interface TruckType {
   maxWeight: number;
   dimensions: { width: number; length: number; height: number };
   usableSpace: number;
+  jobKey: string; // Key for rate data
 }
 
 interface CargoItem {
@@ -39,7 +40,7 @@ interface CargoItem {
   weight: number;
 }
 
-// Truck Data
+// Truck Data with job key mapping
 const truckTypes: TruckType[] = [
   {
     id: 'pickup',
@@ -49,6 +50,7 @@ const truckTypes: TruckType[] = [
     maxWeight: 1500,
     dimensions: { width: 1.65, length: 2.30, height: 2.0 },
     usableSpace: 80,
+    jobKey: '4ล้อ_PPY',
   },
   {
     id: 'jumbo',
@@ -58,6 +60,7 @@ const truckTypes: TruckType[] = [
     maxWeight: 3000,
     dimensions: { width: 1.80, length: 3.20, height: 2.10 },
     usableSpace: 100,
+    jobKey: 'จัมโบ้_PPY',
   },
   {
     id: '6wheel',
@@ -67,25 +70,25 @@ const truckTypes: TruckType[] = [
     maxWeight: 6000,
     dimensions: { width: 2.40, length: 6.60, height: 2.35 },
     usableSpace: 90,
+    jobKey: '6ล้อ_PPY',
   },
 ];
 
-// Fallback oil price
+// Fallback oil price (update manually when needed)
 const FALLBACK_OIL_PRICE = 50.54;
 
 export default function Home() {
-  // Tab State
-  const [activeTab, setActiveTab] = useState<'price' | 'cbm'>('price');
+  // Tab State - Default to CBM
+  const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
   
   // Oil Price State
-  const [currentOilPrice, setCurrentOilPrice] = useState<number | null>(null);
+  const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
-  const [apiError, setApiError] = useState<string | null>(null);
   
   // Price Calculator State
-  const [selectedJob, setSelectedJob] = useState('4ล้อ_PPY');
-  const [distance, setDistance] = useState('');
+  const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
+  const [distance, setDistance] = useState<string>('');
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [priceDetails, setPriceDetails] = useState<{
     oilRange: string;
@@ -102,19 +105,28 @@ export default function Home() {
   
   // Rate Data
   const [rateData, setRateData] = useState<RateData | null>(null);
+  const [availableJobs, setAvailableJobs] = useState<string[]>([]);
 
   // Load rate data
   useEffect(() => {
     fetch('/transport_rates.json')
       .then((res) => res.json())
-      .then((data) => setRateData(data))
-      .catch(() => console.error('Failed to load rate data'));
+      .then((data) => {
+        console.log('Rate data loaded:', data);
+        setRateData(data);
+        // Get available job keys
+        const keys = Object.keys(data);
+        setAvailableJobs(keys);
+        if (keys.length > 0) {
+          setSelectedJob(keys[0]);
+        }
+      })
+      .catch((err) => console.error('Failed to load rate data:', err));
   }, []);
 
   // Fetch oil price
   const fetchOilPrice = useCallback(async () => {
     setLoadingOil(true);
-    setApiError(null);
     
     try {
       const res = await fetch('/api/oil-price');
@@ -131,29 +143,14 @@ export default function Home() {
         const exists = history.some((h) => h.date === data.date);
         if (!exists) {
           history.unshift({ date: data.date, price: data.price });
-          // Keep only last 5
           history = history.slice(0, 5);
           localStorage.setItem('oilPriceHistory', JSON.stringify(history));
         }
         
         setOilPriceHistory(history);
-      } else if (data.error) {
-        console.error('API Error:', data.error);
-        setApiError(data.error);
-        
-        // Use localStorage as fallback
-        const savedHistory = localStorage.getItem('oilPriceHistory');
-        if (savedHistory) {
-          const history: OilPrice[] = JSON.parse(savedHistory);
-          if (history.length > 0) {
-            setCurrentOilPrice(history[0].price);
-            setOilPriceHistory(history);
-          }
-        }
       }
     } catch (error) {
       console.error('Failed to fetch oil price:', error);
-      setApiError('ไม่สามารถเชื่อมต่อ API ได้');
       
       // Use localStorage as fallback
       const savedHistory = localStorage.getItem('oilPriceHistory');
@@ -173,8 +170,15 @@ export default function Home() {
     fetchOilPrice();
   }, [fetchOilPrice]);
 
-  // Calculate price
+  // Calculate price when inputs change
   useEffect(() => {
+    console.log('Calculating price...', { 
+      rateData: !!rateData, 
+      distance, 
+      currentOilPrice, 
+      selectedJob 
+    });
+    
     if (!rateData || !distance || !currentOilPrice) {
       setCalculatedPrice(null);
       setPriceDetails(null);
@@ -182,9 +186,23 @@ export default function Home() {
     }
 
     const jobData = rateData[selectedJob];
-    if (!jobData) return;
+    if (!jobData) {
+      console.error('Job not found:', selectedJob, 'Available:', Object.keys(rateData));
+      setCalculatedPrice(null);
+      setPriceDetails(null);
+      return;
+    }
 
     const dist = parseFloat(distance);
+    if (isNaN(dist) || dist <= 0) {
+      setCalculatedPrice(null);
+      setPriceDetails(null);
+      return;
+    }
+    
+    console.log('Job data:', jobData);
+    console.log('Oil ranges:', jobData.oil_ranges);
+    console.log('Distance rows:', jobData.data?.length);
     
     // Find oil price range
     let oilIndex = -1;
@@ -196,42 +214,57 @@ export default function Home() {
       }
     }
 
+    // If not found, use last range
     if (oilIndex === -1) {
-      // Use last range if price is higher
       oilIndex = jobData.oil_ranges.length - 1;
     }
 
     // Find distance range
     let distIndex = -1;
     let distRange = '';
-    for (let i = 0; i < jobData.data.length; i++) {
-      const row = jobData.data[i];
-      if (dist >= row.dist_min && dist <= row.dist_max) {
-        distIndex = i;
-        distRange = `${row.dist_min} - ${row.dist_max} กม.`;
-        break;
+    
+    if (jobData.data && jobData.data.length > 0) {
+      for (let i = 0; i < jobData.data.length; i++) {
+        const row = jobData.data[i];
+        if (dist >= row.dist_min && dist <= row.dist_max) {
+          distIndex = i;
+          distRange = `${row.dist_min} - ${row.dist_max} กม.`;
+          break;
+        }
+      }
+
+      if (distIndex === -1) {
+        if (dist < jobData.data[0].dist_min) {
+          distIndex = 0;
+          distRange = `0 - ${jobData.data[0].dist_max} กม.`;
+        } else {
+          distIndex = jobData.data.length - 1;
+          const lastRow = jobData.data[distIndex];
+          distRange = `${lastRow.dist_min}+ กม.`;
+        }
       }
     }
 
-    if (distIndex === -1) {
-      // Check if distance is below minimum
-      if (dist < jobData.data[0].dist_min) {
-        distIndex = 0;
-        distRange = `0 - ${jobData.data[0].dist_max} กม.`;
-      } else {
-        // Use last range if distance is higher
-        const lastRow = jobData.data[jobData.data.length - 1];
-        distIndex = jobData.data.length - 1;
-        distRange = `${lastRow.dist_min} - ${lastRow.dist_max}+ กม.`;
-      }
+    if (distIndex >= 0 && jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
+      const price = jobData.data[distIndex].prices[oilIndex];
+      const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
+
+      console.log('Price calculated:', price);
+      setCalculatedPrice(price);
+      setPriceDetails({ oilRange, distRange });
+    } else {
+      console.error('Could not find price at distIndex:', distIndex, 'oilIndex:', oilIndex);
+      setCalculatedPrice(null);
+      setPriceDetails(null);
     }
-
-    const price = jobData.data[distIndex].prices[oilIndex];
-    const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
-
-    setCalculatedPrice(price);
-    setPriceDetails({ oilRange, distRange });
   }, [rateData, selectedJob, distance, currentOilPrice]);
+
+  // Navigate to price calculator with selected truck
+  const goToPriceCalculator = (truck: TruckType) => {
+    setSelectedTruck(truck);
+    setSelectedJob(truck.jobKey);
+    setActiveTab('price');
+  };
 
   // CBM Calculations
   const calculateCBM = (item: CargoItem) => {
@@ -245,7 +278,6 @@ export default function Home() {
     const { width, length, height } = item;
     const { width: tw, length: tl, height: th } = truck.dimensions;
     
-    // Try all rotations
     const rotations = [
       [width, length, height],
       [width, height, length],
@@ -263,13 +295,9 @@ export default function Home() {
     const { width, length, height } = item;
     const { width: tw, length: tl, height: th } = truck.dimensions;
 
-    if (width > tw * 100 && length > tw * 100 && height > tw * 100) {
-      issues.push(`ทุกด้านเกิน ${tw * 100} ซม.`);
-    } else {
-      if (width > tw * 100 && width > tl * 100) issues.push(`กว้าง ${width} ซม.`);
-      if (length > tl * 100 && length > tw * 100) issues.push(`ยาว ${length} ซม.`);
-      if (height > th * 100) issues.push(`สูง ${height} ซม.`);
-    }
+    if (width > tw * 100 && width > tl * 100) issues.push(`กว้าง ${width} ซม.`);
+    if (length > tl * 100 && length > tw * 100) issues.push(`ยาว ${length} ซม.`);
+    if (height > th * 100) issues.push(`สูง ${height} ซม.`);
 
     return issues;
   };
@@ -292,7 +320,6 @@ export default function Home() {
   };
 
   const recommendedTruck = cargoItems.length > 0 && totalCBM > 0 ? getRecommendedTruck() : null;
-
   const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
 
   const addCargoItem = () => {
@@ -328,9 +355,6 @@ export default function Home() {
     setShowPopup(true);
   };
 
-  // Get display price (current or fallback)
-  const displayPrice = currentOilPrice || FALLBACK_OIL_PRICE;
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       {/* Header */}
@@ -354,16 +378,6 @@ export default function Home() {
       <div className="max-w-4xl mx-auto px-4 pt-4">
         <div className="flex gap-2 bg-white rounded-lg shadow p-1">
           <button
-            onClick={() => setActiveTab('price')}
-            className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-              activeTab === 'price'
-                ? 'bg-blue-600 text-white shadow'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            💰 คำนวณราคา
-          </button>
-          <button
             onClick={() => setActiveTab('cbm')}
             className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
               activeTab === 'cbm'
@@ -373,165 +387,44 @@ export default function Home() {
           >
             📦 คำนวณ CBM
           </button>
+          <button
+            onClick={() => setActiveTab('price')}
+            className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
+              activeTab === 'price'
+                ? 'bg-blue-600 text-white shadow'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            💰 คำนวณราคา
+          </button>
         </div>
       </div>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* Price Calculator Tab */}
-        {activeTab === 'price' && (
-          <div className="space-y-6">
-            {/* Oil Price Card */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
-                </h2>
-                <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
-              </div>
-              
-              <div className="p-4">
-                {loadingOil ? (
-                  <div className="text-center py-4">
-                    <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
-                    <p className="text-gray-500 mt-2">กำลังโหลดราคาน้ำมัน...</p>
-                  </div>
-                ) : oilPriceHistory.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="bg-gray-50">
-                          <th className="text-left py-2 px-3 text-gray-600 font-medium">วันที่ปรับราคา</th>
-                          <th className="text-right py-2 px-3 text-gray-600 font-medium">ราคา (บาท)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {oilPriceHistory.map((item, index) => (
-                          <tr
-                            key={item.date}
-                            className={`border-b ${
-                              index === 0 ? 'bg-blue-50 font-bold' : ''
-                            }`}
-                          >
-                            <td className="py-2 px-3 text-gray-700">
-                              {item.date}
-                              {index === 0 && (
-                                <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                                  ใช้คำนวณ
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-right text-gray-900">
-                              {item.price.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {apiError && (
-                      <p className="text-xs text-orange-500 mt-2 text-center">
-                        ⚠️ {apiError} (ใช้ข้อมูลที่บันทึกไว้)
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-gray-600 mb-2">ราคาน้ำมันดีเซล</p>
-                    <p className="text-3xl font-bold text-orange-600">{displayPrice.toFixed(2)} บาท</p>
-                    <p className="text-sm text-orange-500 mt-2">
-                      ⚠️ ใช้ข้อมูลประมาณการ
-                    </p>
-                    <button 
-                      onClick={() => fetchOilPrice()}
-                      className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
-                    >
-                      🔄 ลองโหลดใหม่
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Price Calculator Card */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
-                <h2 className="text-lg font-bold">🧮 คำนวณราคาค่าขนส่ง</h2>
-              </div>
-              
-              <div className="p-6 space-y-6">
-                {/* Job Selection */}
-                <div>
-                  <label className="block text-gray-700 font-medium mb-2">
-                    ประเภทงาน <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={selectedJob}
-                    onChange={(e) => setSelectedJob(e.target.value)}
-                    className="w-full border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
-                  >
-                    <option value="4ล้อ_PPY">4 ล้อ PPY</option>
-                    <option value="จัมโบ้_PPY">4 ล้อ จัมโบ้ PPY</option>
-                    <option value="6ล้อ_PPY">6 ล้อ PPY</option>
-                  </select>
-                </div>
-
-                {/* Distance Input */}
-                <div>
-                  <label className="block text-gray-700 font-medium mb-2">
-                    ระยะทาง <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={distance}
-                      onChange={(e) => setDistance(e.target.value)}
-                      placeholder="กรอกระยะทาง"
-                      className="flex-1 border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
-                    />
-                    <span className="text-gray-600 font-medium">กม.</span>
-                  </div>
-                </div>
-
-                {/* Result */}
-                {calculatedPrice !== null && priceDetails && (
-                  <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border-2 border-blue-200">
-                    <div className="text-center">
-                      <p className="text-gray-600 mb-2">ราคาค่าขนส่ง</p>
-                      <p className="text-4xl font-bold text-blue-600">
-                        ฿{calculatedPrice.toLocaleString()}
-                      </p>
-                      <div className="mt-4 text-sm text-gray-500 space-y-1">
-                        <p>ช่วงราคาน้ำมัน: {priceDetails.oilRange}</p>
-                        <p>ช่วงระยะทาง: {priceDetails.distRange}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* CBM Calculator Tab */}
+        {/* CBM Calculator Tab - DEFAULT */}
         {activeTab === 'cbm' && (
           <div className="space-y-6">
             {/* Truck Selection */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">🚛 เลือกประเภทรถ</h2>
+                <p className="text-blue-100 text-sm">เลือกรถแล้วกด "คำนวณราคา" เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
               </div>
               
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {truckTypes.map((truck) => (
                   <div
                     key={truck.id}
-                    onClick={() => setSelectedTruck(truck)}
-                    className={`cursor-pointer rounded-xl border-2 transition-all ${
+                    className={`rounded-xl border-2 transition-all ${
                       selectedTruck.id === truck.id
                         ? 'border-blue-500 bg-blue-50 shadow-lg'
                         : 'border-gray-200 hover:border-blue-300'
                     }`}
                   >
-                    <div className="relative h-48 overflow-hidden rounded-t-xl">
+                    <div 
+                      className="relative h-48 overflow-hidden rounded-t-xl cursor-pointer"
+                      onClick={() => setSelectedTruck(truck)}
+                    >
                       <Image
                         src={truck.image}
                         alt={truck.name}
@@ -548,10 +441,23 @@ export default function Home() {
                       >
                         กดเพื่อดูข้อมูลเพิ่มเติม
                       </button>
+                      {selectedTruck.id === truck.id && (
+                        <div className="absolute top-2 right-2 bg-blue-600 text-white rounded-full p-1">
+                          ✓
+                        </div>
+                      )}
                     </div>
                     <div className="p-3">
                       <h3 className="font-bold text-gray-800">{truck.name}</h3>
                       <p className="text-sm text-gray-600">CBM: {truck.cbm} | น้ำหนัก: {truck.maxWeight.toLocaleString()} kg</p>
+                      
+                      {/* Go to Price Calculator Button */}
+                      <button
+                        onClick={() => goToPriceCalculator(truck)}
+                        className="mt-2 w-full py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-medium hover:from-green-600 hover:to-green-700 transition text-sm"
+                      >
+                        💰 คำนวณราคา
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -740,6 +646,14 @@ export default function Home() {
                       </p>
                     </div>
                   )}
+                  
+                  {/* Button to go to price calculator */}
+                  <button
+                    onClick={() => goToPriceCalculator(selectedTruck)}
+                    className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-bold hover:from-green-600 hover:to-green-700 transition"
+                  >
+                    💰 ไปคำนวณราคาค่าขนส่ง
+                  </button>
                 </div>
               </div>
             )}
@@ -750,6 +664,155 @@ export default function Home() {
               className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300"
             >
               🔄 รีเซ็ตข้อมูล
+            </button>
+          </div>
+        )}
+
+        {/* Price Calculator Tab */}
+        {activeTab === 'price' && (
+          <div className="space-y-6">
+            {/* Oil Price Card */}
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
+                </h2>
+                <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
+              </div>
+              
+              <div className="p-4">
+                {loadingOil ? (
+                  <div className="text-center py-4">
+                    <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div>
+                    <p className="text-gray-500 mt-2">กำลังโหลดราคาน้ำมัน...</p>
+                  </div>
+                ) : oilPriceHistory.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="text-left py-2 px-3 text-gray-600 font-medium">วันที่ปรับราคา</th>
+                          <th className="text-right py-2 px-3 text-gray-600 font-medium">ราคา (บาท)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {oilPriceHistory.map((item, index) => (
+                          <tr
+                            key={item.date}
+                            className={`border-b ${
+                              index === 0 ? 'bg-blue-50 font-bold' : ''
+                            }`}
+                          >
+                            <td className="py-2 px-3 text-gray-700">
+                              {item.date}
+                              {index === 0 && (
+                                <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
+                                  ใช้คำนวณ
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right text-gray-900">
+                              {item.price.toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-gray-600 mb-2">ราคาน้ำมันดีเซล</p>
+                    <p className="text-3xl font-bold text-orange-600">{currentOilPrice.toFixed(2)} บาท</p>
+                    <p className="text-sm text-orange-500 mt-2">
+                      ⚠️ ใช้ข้อมูลประมาณการ
+                    </p>
+                    <button 
+                      onClick={() => fetchOilPrice()}
+                      className="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
+                    >
+                      🔄 ลองโหลดใหม่
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Price Calculator Card */}
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
+                <h2 className="text-lg font-bold">🧮 คำนวณราคาค่าขนส่ง</h2>
+                <p className="text-blue-100 text-sm">ประเภทรถ: {selectedTruck.name}</p>
+              </div>
+              
+              <div className="p-6 space-y-6">
+                {/* Job Selection */}
+                <div>
+                  <label className="block text-gray-700 font-medium mb-2">
+                    ประเภทงาน <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedJob}
+                    onChange={(e) => setSelectedJob(e.target.value)}
+                    className="w-full border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
+                  >
+                    {availableJobs.map((job) => (
+                      <option key={job} value={job}>{job}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Distance Input */}
+                <div>
+                  <label className="block text-gray-700 font-medium mb-2">
+                    ระยะทาง <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={distance}
+                      onChange={(e) => setDistance(e.target.value)}
+                      placeholder="กรอกระยะทาง"
+                      className="flex-1 border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-blue-500 focus:outline-none text-lg"
+                    />
+                    <span className="text-gray-600 font-medium">กม.</span>
+                  </div>
+                </div>
+
+                {/* Result */}
+                {calculatedPrice !== null && priceDetails ? (
+                  <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border-2 border-blue-200">
+                    <div className="text-center">
+                      <p className="text-gray-600 mb-2">ราคาค่าขนส่ง</p>
+                      <p className="text-4xl font-bold text-blue-600">
+                        ฿{calculatedPrice.toLocaleString()}
+                      </p>
+                      <div className="mt-4 text-sm text-gray-500 space-y-1">
+                        <p>ช่วงราคาน้ำมัน: {priceDetails.oilRange}</p>
+                        <p>ช่วงระยะทาง: {priceDetails.distRange}</p>
+                        <p>ราคาน้ำมันที่ใช้: {currentOilPrice.toFixed(2)} บาท</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : distance && !rateData ? (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
+                    ⚠️ กำลังโหลดข้อมูลราคา...
+                  </div>
+                ) : distance && rateData && !calculatedPrice ? (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+                    ❌ ไม่พบราคาสำหรับระยะทาง {distance} กม.
+                    <br />
+                    <span className="text-sm">หรือข้อมูลอัตราค่าขนส่งไม่ครบถ้วน</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            
+            {/* Back to CBM Button */}
+            <button
+              onClick={() => setActiveTab('cbm')}
+              className="w-full py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
+            >
+              📦 กลับไปคำนวณ CBM
             </button>
           </div>
         )}
