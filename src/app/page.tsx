@@ -124,48 +124,28 @@ export default function Home() {
       .catch((err) => console.error('Failed to load rate data:', err));
   }, []);
 
-  // Fetch oil price
-  const fetchOilPrice = useCallback(async () => {
-    setLoadingOil(true);
+ // Fetch oil price
+const fetchOilPrice = useCallback(async () => {
+  setLoadingOil(true);
+  
+  try {
+    const res = await fetch('/api/oil-price');
+    const data = await res.json();
     
-    try {
-      const res = await fetch('/api/oil-price');
-      const data = await res.json();
+    // Use price and history from API (Edge Config)
+    if (data.price !== undefined && data.price !== null) {
+      setCurrentOilPrice(data.price);
       
-      if (data.price) {
-        setCurrentOilPrice(data.price);
-        
-        // Save to history (localStorage)
-        const savedHistory = localStorage.getItem('oilPriceHistory');
-        let history: OilPrice[] = savedHistory ? JSON.parse(savedHistory) : [];
-        
-        // Check if this date already exists
-        const exists = history.some((h) => h.date === data.date);
-        if (!exists) {
-          history.unshift({ date: data.date, price: data.price });
-          history = history.slice(0, 5);
-          localStorage.setItem('oilPriceHistory', JSON.stringify(history));
-        }
-        
-        setOilPriceHistory(history);
+      if (data.history && data.history.length > 0) {
+        setOilPriceHistory(data.history);
       }
-    } catch (error) {
-      console.error('Failed to fetch oil price:', error);
-      
-      // Use localStorage as fallback
-      const savedHistory = localStorage.getItem('oilPriceHistory');
-      if (savedHistory) {
-        const history: OilPrice[] = JSON.parse(savedHistory);
-        if (history.length > 0) {
-          setCurrentOilPrice(history[0].price);
-          setOilPriceHistory(history);
-        }
-      }
-    } finally {
-      setLoadingOil(false);
     }
-  }, []);
-
+  } catch (error) {
+    console.error('Failed to fetch oil price:', error);
+  } finally {
+    setLoadingOil(false);
+  }
+}, []);
   useEffect(() => {
     fetchOilPrice();
   }, [fetchOilPrice]);
