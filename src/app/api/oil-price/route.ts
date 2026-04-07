@@ -1,205 +1,116 @@
 import { NextResponse } from 'next/server';
+import { get, put } from '@vercel/edge-config';
 
 const FALLBACK_PRICE = 50.54;
+const HISTORY_KEY = 'oil-price-history';
 
-// PTT SOAP API URL
-const PTT_SOAP_URL = 'https://orapiweb.pttor.com/oilservice/OilPrice.asmx';
-
-async function fetchFromPTT(language: string = 'th'): Promise<{ date: string; price: number } | null> {
-  const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <CurrentOilPrice xmlns="http://www.pttor.com">
-      <Language>${language}</Language>
-    </CurrentOilPrice>
-  </soap:Body>
-</soap:Envelope>`;
-
+// ===== EDGE CONFIG HELPERS =====
+async function getHistory(): Promise<{ date: string; price: number }[]> {
   try {
-    const response = await fetch(PTT_SOAP_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': 'https://orapiweb.pttor.com/CurrentOilPrice',
-      },
-      body: soapEnvelope,
+    const history = await get<{ date: string; price: number }[]>(HISTORY_KEY);
+    return history || [];
+  } catch (error) {
+    console.error('Edge Config get error:', error);
+    return [];
+  }
+}
+
+async function saveHistory(history: { date: string; price: number }[]): Promise<void> {
+  try {
+    await put(HISTORY_KEY, history);
+  } catch (error) {
+    console.error('Edge Config put error:', error);
+  }
+}
+
+// ===== BANGCHAK API =====
+async function fetchFromBangchak(): Promise<{ date: string; price: number } | null> {
+  try {
+    const url = 'https://oil-price.bangchak.co.th/ApiOilPrice2/th';
+    const response = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
     });
 
-    if (!response.ok) {
-      console.log('PTT SOAP status:', response.status);
-      return null;
-    }
+    if (!response.ok) return null;
 
-    const xmlText = await response.text();
+    const data = await response.json();
+    const oilData = Array.isArray(data) ? data[0] : data;
+    const oilList = typeof oilData.OilList === 'string' 
+      ? JSON.parse(oilData.OilList) 
+      : oilData.OilList;
     
-    // Extract JSON from SOAP response
-    const resultMatch = xmlText.match(/<CurrentOilPriceResult[^>]*>([\s\S]*?)<\/CurrentOilPriceResult>/);
-    
-    if (!resultMatch) {
-      console.log('No CurrentOilPriceResult found');
-      return null;
-    }
+    const diesel = oilList.find((oil: { OilName: string }) => 
+      oil.OilName === 'ไฮดีเซล S'
+    );
 
-    // Decode XML entities
-    let jsonStr = resultMatch[1]
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
-      .trim();
-
-    const oilData = JSON.parse(jsonStr);
-    
-    // Find diesel
-    if (Array.isArray(oilData)) {
-      const diesel = oilData.find((item: { PRODUCT?: string; OilName?: string }) => 
-        item.PRODUCT?.includes('ดีเซล') || item.OilName?.includes('ดีเซล')
-      );
+    if (diesel) {
+      // ดึงวันที่มีผลจาก OilRemark2
+      const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
+      let effectiveDate = oilData.OilPriceDate;
       
-      if (diesel) {
-        return {
-          date: diesel.PRICE_DATE || diesel.OilPriceDate || new Date().toLocaleDateString('th-TH'),
-          price: parseFloat(diesel.PRICE || diesel.PriceToday || 0),
+      if (remarkMatch) {
+        const day = remarkMatch[1].padStart(2, '0');
+        const thaiMonth = remarkMatch[2];
+        
+        const months: { [key: string]: string } = {
+          'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
+          'พ.ค.': '05', 'มิ.ย.': '06', 'ก.ค.': '07', 'ส.ค.': '08',
+          'ก.ย.': '09', 'ต.ค.': '10', 'พ.ย.': '11', 'ธ.ค.': '12'
         };
+        
+        const month = months[thaiMonth] || '01';
+        const year = remarkMatch[3];
+        effectiveDate = `${day}/${month}/${year}`;
       }
+      
+      return { date: effectiveDate, price: diesel.PriceToday };
     }
     
     return null;
   } catch (error) {
-    console.error('PTT SOAP error:', error);
+    console.error('Bangchak API error:', error);
     return null;
   }
 }
 
-// Get historical oil price
-async function fetchHistoryFromPTT(days: number = 5): Promise<{ date: string; price: number }[]> {
-  const history: { date: string; price: number }[] = [];
-  const today = new Date();
-  
-  for (let i = 0; i < days; i++) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    
-    const dd = date.getDate();
-    const mm = date.getMonth() + 1;
-    const yyyy = date.getFullYear();
-    
-    const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <GetOilPrice xmlns="http://www.pttor.com">
-      <Language>th</Language>
-      <DD>${dd}</DD>
-      <MM>${mm}</MM>
-      <YYYY>${yyyy}</YYYY>
-    </GetOilPrice>
-  </soap:Body>
-</soap:Envelope>`;
-
-    try {
-      const response = await fetch(PTT_SOAP_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': 'https://orapiweb.pttor.com/GetOilPrice',
-        },
-        body: soapEnvelope,
-      });
-
-      if (response.ok) {
-        const xmlText = await response.text();
-        const resultMatch = xmlText.match(/<GetOilPriceResult[^>]*>([\s\S]*?)<\/GetOilPriceResult>/);
-        
-        if (resultMatch) {
-          let jsonStr = resultMatch[1]
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&')
-            .replace(/&quot;/g, '"')
-            .trim();
-
-          const oilData = JSON.parse(jsonStr);
-          
-          if (Array.isArray(oilData)) {
-            const diesel = oilData.find((item: { PRODUCT?: string }) => 
-              item.PRODUCT?.includes('ดีเซล')
-            );
-            
-            if (diesel && diesel.PRICE) {
-              history.push({
-                date: `${dd}/${mm}/${yyyy}`,
-                price: parseFloat(diesel.PRICE),
-              });
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`Error fetching ${dd}/${mm}/${yyyy}:`, error);
-    }
-    
-    // Add delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
-  
-  return history;
-}
-
+// ===== MAIN HANDLER =====
 export async function GET() {
   try {
-    // Try Bangchak API first (faster)
-    const bangchakUrl = 'https://oil-price.bangchak.co.th/ApiOilPrice2/th';
+    // 1. Get current price from Bangchak
+    const currentPrice = await fetchFromBangchak();
     
-    const bangchakResponse = await fetch(bangchakUrl, {
-      headers: { 'Accept': 'application/json' }
-    });
-
-    if (bangchakResponse.ok) {
-      const data = await bangchakResponse.json();
-      const oilData = Array.isArray(data) ? data[0] : data;
-      const oilList = typeof oilData.OilList === 'string' 
-        ? JSON.parse(oilData.OilList) 
-        : oilData.OilList;
+    // 2. Get existing history from Edge Config
+    let history = await getHistory();
+    
+    // 3. If we have new price, add to history
+    if (currentPrice) {
+      const exists = history.some(h => h.date === currentPrice.date);
       
-      const diesel = oilList.find((oil: { OilName: string }) => 
-        oil.OilName === 'ไฮดีเซล S'
-      );
-      
-      if (diesel) {
-        // Fetch history from PTT (in background)
-        const history = await fetchHistoryFromPTT(5);
+      if (!exists) {
+        // Add new price at the top, keep only 5
+        history = [currentPrice, ...history].slice(0, 5);
         
-        return NextResponse.json({
-          date: oilData.OilPriceDate,
-          price: diesel.PriceToday,
-          priceYesterday: diesel.PriceYesterday,
-          priceTomorrow: diesel.PriceTomorrow,
-          remark: oilData.OilRemark2,
-          history: history,
-          source: 'bangchak-api',
-        });
+        // Save to Edge Config
+        await saveHistory(history);
       }
     }
-
-    // Fallback to PTT SOAP API
-    const pttResult = await fetchFromPTT('th');
     
-    if (pttResult) {
-      const history = await fetchHistoryFromPTT(5);
-      
+    // 4. Return response
+    if (history.length > 0) {
       return NextResponse.json({
-        date: pttResult.date,
-        price: pttResult.price,
+        date: history[0].date,
+        price: history[0].price,
         history: history,
-        source: 'ptt-soap-api',
+        source: 'bangchak-api',
       });
     }
-
-    // Final fallback
+    
+    // Fallback if no history
     return NextResponse.json({
       date: new Date().toLocaleDateString('th-TH'),
       price: FALLBACK_PRICE,
-      history: [],
+      history: [{ date: new Date().toLocaleDateString('th-TH'), price: FALLBACK_PRICE }],
       source: 'fallback',
     });
 
