@@ -1,112 +1,126 @@
 import { NextResponse } from 'next/server';
 
-// Correct fallback price (current diesel price)
 const FALLBACK_PRICE = 50.54;
 
 export async function GET() {
   try {
-    // Try Bangchak API with better error handling
-    const apiUrl = 'https://oil-price.bangchak.co.th/ApiGetOilPrice/GetOilPrice';
+    // Bangchak Web Service URL (จากวิดีโอ)
+    const url = 'https://oil-price.bangchak.co.th/ApiGetOilPrice/GetOilPrice';
     
-    console.log('Fetching from:', apiUrl);
+    console.log('Fetching from Bangchak:', url);
     
-    const response = await fetch(apiUrl, {
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; CBMCalculator/1.0)',
+        'Accept': 'application/xml, text/xml, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
-      cache: 'no-store',
     });
 
     console.log('Response status:', response.status);
-    console.log('Response ok:', response.ok);
+    console.log('Content-Type:', response.headers.get('content-type'));
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const data = await response.json();
-    console.log('API Response keys:', Object.keys(data));
-    console.log('OilPriceDate:', data.OilPriceDate);
-
-    // Parse oil list
-    let oilList = data.OilList;
-    console.log('OilList type:', typeof oilList);
+    // Get response as text (XML format)
+    const xmlText = await response.text();
+    console.log('Response length:', xmlText.length);
     
-    if (typeof oilList === 'string') {
-      console.log('Parsing OilList string...');
-      oilList = JSON.parse(oilList);
+    // Parse XML to find diesel price
+    // XML structure: <type>ชื่อน้ำมัน</type><today>ราคา</today>
+    
+    // Find all oil entries in XML
+    const oilEntries = xmlText.match(/<item>[\s\S]*?<\/item>/g) || [];
+    console.log('Found oil entries:', oilEntries.length);
+    
+    // Find diesel entry
+    for (const entry of oilEntries) {
+      const typeMatch = entry.match(/<type><!\[CDATA\[(.*?)\]\]><\/type>/) || entry.match(/<type>(.*?)<\/type>/);
+      const todayMatch = entry.match(/<today>(.*?)<\/today>/);
+      
+      if (typeMatch && todayMatch) {
+        const oilName = typeMatch[1];
+        const price = parseFloat(todayMatch[1]);
+        
+        console.log('Found:', oilName, '->', price);
+        
+        // Find Hi-Diesel S or Diesel
+        if (oilName.includes('ไฮดีเซล S') || oilName.includes('ดีเซล')) {
+          // Extract date from remark_th
+          const remarkMatch = entry.match(/<remark_th><!\[CDATA\[(.*?)\]\]><\/remark_th>/) || entry.match(/<remark_th>(.*?)<\/remark_th>/);
+          const date = remarkMatch ? remarkMatch[1] : new Date().toLocaleDateString('th-TH');
+          
+          return NextResponse.json({
+            date: date,
+            price: price,
+            history: [],
+            source: 'bangchak-api',
+            oilName: oilName,
+          });
+        }
+      }
     }
-
-    console.log('OilList length:', Array.isArray(oilList) ? oilList.length : 'not array');
-
-    // Find diesel - try multiple names
-    const dieselNames = [
-      'ไฮดีเซล S',
-      'ไฮดีเซล',
-      'ดีเซล',
-      'Diesel',
-      'Hi-Diesel S'
-    ];
-
-    let diesel = null;
-    for (const name of dieselNames) {
-      diesel = Array.isArray(oilList) 
-        ? oilList.find((oil: { OilName?: string; PRODUCT?: string }) => 
-            oil.OilName?.includes(name) || oil.PRODUCT?.includes(name)
-          )
-        : null;
-      if (diesel) {
-        console.log('Found diesel with name:', name);
-        break;
+    
+    // Alternative: Try JSON API
+    console.log('Trying JSON API...');
+    const jsonResponse = await fetch('https://oil-price.bangchak.co.th/ApiGetOilPrice/GetOilPrice', {
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (jsonResponse.ok) {
+      const data = await jsonResponse.json();
+      console.log('JSON response keys:', Object.keys(data));
+      
+      let oilList = data.OilList;
+      if (typeof oilList === 'string') {
+        oilList = JSON.parse(oilList);
+      }
+      
+      if (Array.isArray(oilList)) {
+        console.log('OilList items:', oilList.length);
+        console.log('First few oils:', oilList.slice(0, 3).map((o: { OilName?: string }) => o.OilName));
+        
+        const diesel = oilList.find((oil: { OilName?: string }) => 
+          oil.OilName === 'ไฮดีเซล S' || 
+          oil.OilName?.includes('ดีเซล')
+        );
+        
+        if (diesel) {
+          return NextResponse.json({
+            date: data.OilPriceDate || new Date().toLocaleDateString('th-TH'),
+            price: diesel.PriceToday,
+            history: [],
+            source: 'bangchak-api',
+            oilName: diesel.OilName,
+          });
+        }
       }
     }
 
-    if (diesel) {
-      const price = diesel.PriceToday || diesel.PRICE || diesel.price || FALLBACK_PRICE;
-      console.log('Diesel price:', price);
-      
-      return NextResponse.json({
-        date: data.OilPriceDate || new Date().toLocaleDateString('th-TH'),
-        price: price,
-        history: [],
-        source: 'bangchak-api',
-        debug: {
-          oilName: diesel.OilName || diesel.PRODUCT,
-          foundWith: dieselNames.find(n => diesel.OilName?.includes(n) || diesel.PRODUCT?.includes(n))
-        }
-      });
-    }
-
-    // Log all oil names for debugging
-    if (Array.isArray(oilList)) {
-      console.log('Available oil names:', oilList.map((o: { OilName?: string }) => o.OilName));
-    }
-
-    // Return fallback with correct price
+    // Fallback
     return NextResponse.json({
       date: new Date().toLocaleDateString('th-TH'),
       price: FALLBACK_PRICE,
       history: [],
       source: 'fallback',
-      error: 'Diesel not found in oil list',
+      error: 'Could not find diesel price in response',
       debug: {
-        oilListLength: Array.isArray(oilList) ? oilList.length : 0,
-        firstFew: Array.isArray(oilList) ? oilList.slice(0, 3) : null
+        xmlLength: xmlText.length,
+        entriesFound: oilEntries.length,
       }
     });
 
   } catch (error) {
-    console.error('Oil price API error:', error);
+    console.error('API Error:', error);
     
-    // Return correct fallback price
     return NextResponse.json({
       date: new Date().toLocaleDateString('th-TH'),
       price: FALLBACK_PRICE,
       history: [],
       source: 'fallback',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 }
