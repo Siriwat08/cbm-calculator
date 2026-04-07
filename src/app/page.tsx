@@ -675,7 +675,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
+                  ⛽ ราคาน้ำมันดีเซล (ดีเซล)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
