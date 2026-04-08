@@ -70,25 +70,14 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     );
 
     if (diesel) {
-      const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
-      let effectiveDate = oilData.OilPriceDate;
+      // ✅ ใช้วันที่ปัจจุบันแทนวันที่จาก API
+      const today = new Date();
+      const day = today.getDate().toString().padStart(2, '0');
+      const month = (today.getMonth() + 1).toString().padStart(2, '0');
+      const year = (today.getFullYear() + 543).toString(); // แปลงเป็น พ.ศ.
+      const currentDate = `${day}/${month}/${year}`;
       
-      if (remarkMatch) {
-        const day = remarkMatch[1].padStart(2, '0');
-        const thaiMonth = remarkMatch[2];
-        
-        const months: { [key: string]: string } = {
-          'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
-          'พ.ค.': '05', 'มิ.ย.': '06', 'ก.ค.': '07', 'ส.ค.': '08',
-          'ก.ย.': '09', 'ต.ค.': '10', 'พ.ย.': '11', 'ธ.ค.': '12'
-        };
-        
-        const month = months[thaiMonth] || '01';
-        const year = remarkMatch[3];
-        effectiveDate = `${day}/${month}/${year}`;
-      }
-      
-      return { date: effectiveDate, price: diesel.PriceToday };
+      return { date: currentDate, price: diesel.PriceToday };
     }
     
     return null;
@@ -116,8 +105,7 @@ export async function GET() {
     // 2. Get existing history
     let history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
-    // 3. ✅ บันทึกทุกวัน แม้ราคาจะเหมือนเดิม
-    // ตรวจสอบว่าวันที่นี้มีใน history แล้วหรือยัง
+    // 3. ✅ บันทึกทุกวัน ใช้วันที่ปัจจุบัน
     const existingIndex = history.findIndex(h => h.date === currentPrice.date);
     
     if (existingIndex === -1) {
