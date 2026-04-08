@@ -417,91 +417,97 @@ export default function Home() {
             </div>
 
             {/* Cargo Items */}
-            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-start">
-             <div>
-               <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-               <p className="text-sm text-yellow-100 mt-1 leading-relaxed">
-                 สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ <br />
-                 โดยกดปุ่ม "+ เพิ่มรายการ" จะมีรายการเพิ่มด้านล่างอัตโนมัติ
-               </p>
-             </div>
-
-             <button
-               onClick={addCargoItem}
-               className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
-             >
-               + เพิ่มรายการ
-            </button>
-           </div>
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
+                <div>
+                  <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
+                  <p className="text-yellow-100 text-xs">สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot;</p>
+                </div>
+                <button
+                  onClick={addCargoItem}
+                  className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
+                >
+                  + เพิ่มรายการ
+                </button>
+              </div>
               
               <div className="p-4 space-y-4">
+                {/* แต่ละรายการอยู่คนละบรรทัด */}
                 {cargoItems.map((item, index) => (
-                  <div key={item.id} className="bg-gray-50 rounded-lg p-4">
+                  <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="flex justify-between items-center mb-3">
-                      <span className="font-medium text-gray-700">รายการ {index + 1}</span>
+                      <span className="font-bold text-gray-800 bg-blue-100 px-3 py-1 rounded">
+                        รายการที่ {index + 1}
+                      </span>
                       {cargoItems.length > 1 && (
                         <button
                           onClick={() => removeCargoItem(item.id)}
-                          className="text-red-500 hover:text-red-700"
+                          className="text-red-500 hover:text-red-700 font-medium"
                         >
-                          ✕ ลบ
+                          ✕ ลบรายการนี้
                         </button>
                       )}
                     </div>
                     
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       <div>
-                        <label className="text-xs text-gray-500">กว้าง (ซม.) *</label>
+                        <label className="text-xs text-gray-500 font-medium">กว้าง (ซม.) *</label>
                         <input
                           type="number"
                           value={item.width || ''}
                           onChange={(e) => updateCargoItem(item.id, 'width', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
+                          className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:outline-none"
+                          placeholder="0"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500">ยาว (ซม.) *</label>
+                        <label className="text-xs text-gray-500 font-medium">ยาว (ซม.) *</label>
                         <input
                           type="number"
                           value={item.length || ''}
                           onChange={(e) => updateCargoItem(item.id, 'length', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
+                          className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:outline-none"
+                          placeholder="0"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500">สูง (ซม.) *</label>
+                        <label className="text-xs text-gray-500 font-medium">สูง (ซม.) *</label>
                         <input
                           type="number"
                           value={item.height || ''}
                           onChange={(e) => updateCargoItem(item.id, 'height', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
+                          className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:outline-none"
+                          placeholder="0"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500">จำนวน</label>
+                        <label className="text-xs text-gray-500 font-medium">จำนวน</label>
                         <input
                           type="number"
                           value={item.quantity}
                           onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                          className="w-full border rounded px-2 py-1"
+                          className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:outline-none"
                           min="1"
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500">น้ำหนัก (kg) *</label>
+                        <label className="text-xs text-gray-500 font-medium">น้ำหนัก (kg) *</label>
                         <input
                           type="number"
                           value={item.weight || ''}
                           onChange={(e) => updateCargoItem(item.id, 'weight', parseFloat(e.target.value) || 0)}
-                          className="w-full border rounded px-2 py-1"
+                          className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-blue-500 focus:outline-none"
+                          placeholder="0"
                         />
                       </div>
                     </div>
                     
                     {item.width > 0 && item.length > 0 && item.height > 0 && (
-                      <p className="text-sm text-blue-600 mt-2">
-                        CBM: {calculateCBM(item).toFixed(4)} m³
-                      </p>
+                      <div className="mt-3 p-2 bg-blue-50 rounded-lg">
+                        <p className="text-sm text-blue-700 font-medium">
+                          📦 CBM: {calculateCBM(item).toFixed(4)} m³
+                        </p>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -644,76 +650,62 @@ export default function Home() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-gray-50">
-                          <th className="text-left py-2 px-3 text-gray-600 font-medium">วันที่ปรับราคา</th>
-                          <th className="text-right py-2 px-3 text-gray-600 font-medium">ราคา (บาท)</th>
+                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-24">วันที่</th>
+                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-20">สถานะ</th>
+                          <th className="text-center py-2 px-2 text-gray-600 font-medium w-24">ใช้คำนวณ</th>
+                          <th className="text-right py-2 px-2 text-gray-600 font-medium">ราคา (บาท)</th>
                         </tr>
                       </thead>
                       <tbody>
-  {oilPriceHistory.map((item, index) => {
-    const prevPrice =
-      index < oilPriceHistory.length - 1
-        ? oilPriceHistory[index + 1]?.price
-        : null;
-
-    const isToday = index === 0;
-    const isPriceChanged =
-      prevPrice !== null && item.price !== prevPrice;
-
-    const isIncrease =
-      prevPrice !== null && item.price > prevPrice;
-
-    const isDecrease =
-      prevPrice !== null && item.price < prevPrice;
-
-    return (
-      <tr
-        key={item.date}
-        className={`border-b ${isToday ? 'bg-blue-50 font-bold' : ''}`}
-      >
-        <td colSpan={2} className="py-2 px-3">
-          <div className="flex items-center justify-between">
-
-            {/* 1. วันที่ (ซ้ายสุด) */}
-            <div className="w-1/4 text-left text-gray-700">
-              {item.date}
-            </div>
-
-            {/* 2. [ปรับราคา] (กลางซ้าย) */}
-            <div className="w-1/4 text-left">
-              {!isToday && isPriceChanged && (
-                <span
-                  className={`text-xs font-medium flex items-center gap-1
-                    ${isIncrease ? 'text-red-500' : ''}
-                    ${isDecrease ? 'text-green-500' : ''}
-                  `}
-                >
-                  {isIncrease && <span>▲</span>}
-                  {isDecrease && <span>▼</span>}
-                  ปรับราคา
-                </span>
-              )}
-            </div>
-
-            {/* 3. [ใช้คำนวณ] (กลางขวา) */}
-            <div className="w-1/4 text-right">
-              {isToday && (
-                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                  ใช้คำนวณ
-                </span>
-              )}
-            </div>
-
-            {/* 4. ราคา (ขวาสุด) */}
-            <div className="w-1/4 text-right text-gray-900">
-              {item.price.toFixed(2)}
-            </div>
-
-          </div>
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
+                        {oilPriceHistory.map((item, index) => {
+                          const prevPrice = index < oilPriceHistory.length - 1 ? oilPriceHistory[index + 1]?.price : null;
+                          const isToday = index === 0;
+                          const isPriceChanged = prevPrice !== null && item.price !== prevPrice;
+                          const priceDecreased = isPriceChanged && item.price < (prevPrice || 0);
+                          const priceIncreased = isPriceChanged && item.price > (prevPrice || 0);
+                          
+                          return (
+                            <tr
+                              key={item.date}
+                              className={`border-b ${
+                                isToday ? 'bg-blue-50' : ''
+                              }`}
+                            >
+                              {/* Column 1: วันที่ - ชิดซ้าย */}
+                              <td className="py-2 px-2 text-gray-700 font-medium">
+                                {item.date}
+                              </td>
+                              
+                              {/* Column 2: สถานะปรับราคา - กลางชิดซ้าย */}
+                              <td className="py-2 px-2">
+                                {isPriceChanged && !isToday && (
+                                  <span className={`font-medium text-sm ${
+                                    priceDecreased ? 'text-green-600' : 'text-red-600'
+                                  }`}>
+                                    {priceDecreased ? '▼ ปรับราคา' : '▲ ปรับราคา'}
+                                  </span>
+                                )}
+                              </td>
+                              
+                              {/* Column 3: ใช้คำนวณ - กลางชิดขวา */}
+                              <td className="py-2 px-2 text-center">
+                                {isToday && (
+                                  <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded font-medium">
+                                    ใช้คำนวณ
+                                  </span>
+                                )}
+                              </td>
+                              
+                              {/* Column 4: ราคา - ชิดขวา */}
+                              <td className={`py-2 px-2 text-right font-bold ${
+                                isToday ? 'text-blue-600 text-lg' : 'text-gray-900'
+                              }`}>
+                                {item.price.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
                     </table>
                   </div>
                 ) : (
