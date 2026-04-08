@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server';
 import { get } from '@vercel/edge-config';
 
 const HISTORY_KEY = 'oil-price-history';
-const FALLBACK_PRICE = 50.54;
 
-// ===== EDGE CONFIG REST API (สำหรับเขียนข้อมูล) =====
+// ===== EDGE CONFIG REST API =====
 async function saveToEdgeConfig(history: { date: string; price: number }[]): Promise<boolean> {
   const edgeConfigId = process.env.EDGE_CONFIG_ID;
   const apiToken = process.env.VERCEL_API_TOKEN;
@@ -71,7 +70,6 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     );
 
     if (diesel) {
-      // ดึงวันที่มีผลจาก OilRemark2
       const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
       let effectiveDate = oilData.OilPriceDate;
       
@@ -100,17 +98,11 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
   }
 }
 
-// ===== CRON HANDLER =====
-export async function GET(request: Request) {
-  // Verify authorization
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+// ===== CRON HANDLER (ไม่มี Authorization Check) =====
+export async function GET() {
+  console.log('Cron job started at:', new Date().toISOString());
+  
   try {
-    console.log('Cron job started at:', new Date().toISOString());
-    
     // 1. Fetch current price
     const currentPrice = await fetchOilPrice();
     
@@ -121,7 +113,7 @@ export async function GET(request: Request) {
       }, { status: 500 });
     }
 
-    // 2. Get existing history from Edge Config (ใช้ get จาก @vercel/edge-config)
+    // 2. Get existing history
     let history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
     // 3. Check if this date already exists
@@ -131,7 +123,7 @@ export async function GET(request: Request) {
       // 4. Add new price at the top, keep only 5
       history = [currentPrice, ...history].slice(0, 5);
       
-      // 5. Save to Edge Config using REST API
+      // 5. Save to Edge Config
       const saved = await saveToEdgeConfig(history);
       
       if (saved) {
