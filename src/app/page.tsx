@@ -420,6 +420,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
                 <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
+                <p className="text-blue-100 text-sm">สามารถใส่รายการสินค้าได้มากกว่า 1 โดยกดปุ่ม &quot;+ เพิ่มรายการ; จะมีรายการเพิ่มด้านล่างอัตโนมัติ</p>
                 <button
                   onClick={addCargoItem}
                   className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
@@ -622,7 +623,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล)
+                  ⛽ ราคาน้ำมันดีเซล (ดีเซล)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
