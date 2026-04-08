@@ -622,7 +622,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
+                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
@@ -648,15 +648,6 @@ export default function Home() {
                           const isToday = index === 0;
                           const isPriceChanged = prevPrice !== null && item.price !== prevPrice;
                           
-                          let priceChangeColor = '';
-                          if (isPriceChanged) {
-                            if (item.price < prevPrice) {
-                              priceChangeColor = 'bg-green-500';
-                            } else if (item.price > prevPrice) {
-                              priceChangeColor = 'bg-red-500';
-                            }
-                          }
-                          
                           return (
                             <tr
                               key={item.date}
@@ -668,7 +659,7 @@ export default function Home() {
                                 <div className="flex items-center gap-2">
                                   <span>{item.date}</span>
                                   {isPriceChanged && !isToday && (
-                                    <span className={`${priceChangeColor} text-white text-xs px-2 py-0.5 rounded`}>
+                                    <span className="text-red-500 text-xs font-normal">
                                       ปรับราคา
                                     </span>
                                   )}
