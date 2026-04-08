@@ -28,7 +28,7 @@ interface TruckType {
   maxWeight: number;
   dimensions: { width: number; length: number; height: number };
   usableSpace: number;
-  jobKey: string; // Key for rate data
+  jobKey: string;
 }
 
 interface CargoItem {
@@ -40,7 +40,7 @@ interface CargoItem {
   weight: number;
 }
 
-// Truck Data with job key mapping
+// Truck Data
 const truckTypes: TruckType[] = [
   {
     id: 'pickup',
@@ -74,19 +74,15 @@ const truckTypes: TruckType[] = [
   },
 ];
 
-// Fallback oil price (update manually when needed)
 const FALLBACK_OIL_PRICE = 50.54;
 
 export default function Home() {
-  // Tab State - Default to CBM
   const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
   
-  // Oil Price State
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
   
-  // Price Calculator State
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
   const [distance, setDistance] = useState<string>('');
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
@@ -95,7 +91,6 @@ export default function Home() {
     distRange: string;
   } | null>(null);
   
-  // CBM Calculator State
   const [selectedTruck, setSelectedTruck] = useState(truckTypes[0]);
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([
     { id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 },
@@ -103,7 +98,6 @@ export default function Home() {
   const [showPopup, setShowPopup] = useState(false);
   const [popupImage, setPopupImage] = useState('');
   
-  // Rate Data
   const [rateData, setRateData] = useState<RateData | null>(null);
   const [availableJobs, setAvailableJobs] = useState<string[]>([]);
 
@@ -112,9 +106,7 @@ export default function Home() {
     fetch('/transport_rates.json')
       .then((res) => res.json())
       .then((data) => {
-        console.log('Rate data loaded:', data);
         setRateData(data);
-        // Get available job keys
         const keys = Object.keys(data);
         setAvailableJobs(keys);
         if (keys.length > 0) {
@@ -124,41 +116,34 @@ export default function Home() {
       .catch((err) => console.error('Failed to load rate data:', err));
   }, []);
 
- // Fetch oil price
-const fetchOilPrice = useCallback(async () => {
-  setLoadingOil(true);
-  
-  try {
-    const res = await fetch('/api/oil-price');
-    const data = await res.json();
+  // Fetch oil price
+  const fetchOilPrice = useCallback(async () => {
+    setLoadingOil(true);
     
-    // Use price and history from API (Edge Config)
-    if (data.price !== undefined && data.price !== null) {
-      setCurrentOilPrice(data.price);
+    try {
+      const res = await fetch('/api/oil-price');
+      const data = await res.json();
       
-      if (data.history && data.history.length > 0) {
-        setOilPriceHistory(data.history);
+      if (data.price !== undefined && data.price !== null) {
+        setCurrentOilPrice(data.price);
+        
+        if (data.history && data.history.length > 0) {
+          setOilPriceHistory(data.history);
+        }
       }
+    } catch (error) {
+      console.error('Failed to fetch oil price:', error);
+    } finally {
+      setLoadingOil(false);
     }
-  } catch (error) {
-    console.error('Failed to fetch oil price:', error);
-  } finally {
-    setLoadingOil(false);
-  }
-}, []);
+  }, []);
+
   useEffect(() => {
     fetchOilPrice();
   }, [fetchOilPrice]);
 
-  // Calculate price when inputs change
+  // Calculate price
   useEffect(() => {
-    console.log('Calculating price...', { 
-      rateData: !!rateData, 
-      distance, 
-      currentOilPrice, 
-      selectedJob 
-    });
-    
     if (!rateData || !distance || !currentOilPrice) {
       setCalculatedPrice(null);
       setPriceDetails(null);
@@ -167,7 +152,6 @@ const fetchOilPrice = useCallback(async () => {
 
     const jobData = rateData[selectedJob];
     if (!jobData) {
-      console.error('Job not found:', selectedJob, 'Available:', Object.keys(rateData));
       setCalculatedPrice(null);
       setPriceDetails(null);
       return;
@@ -180,11 +164,6 @@ const fetchOilPrice = useCallback(async () => {
       return;
     }
     
-    console.log('Job data:', jobData);
-    console.log('Oil ranges:', jobData.oil_ranges);
-    console.log('Distance rows:', jobData.data?.length);
-    
-    // Find oil price range
     let oilIndex = -1;
     for (let i = 0; i < jobData.oil_ranges.length; i++) {
       const range = jobData.oil_ranges[i];
@@ -194,12 +173,10 @@ const fetchOilPrice = useCallback(async () => {
       }
     }
 
-    // If not found, use last range
     if (oilIndex === -1) {
       oilIndex = jobData.oil_ranges.length - 1;
     }
 
-    // Find distance range
     let distIndex = -1;
     let distRange = '';
     
@@ -229,24 +206,20 @@ const fetchOilPrice = useCallback(async () => {
       const price = jobData.data[distIndex].prices[oilIndex];
       const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
 
-      console.log('Price calculated:', price);
       setCalculatedPrice(price);
       setPriceDetails({ oilRange, distRange });
     } else {
-      console.error('Could not find price at distIndex:', distIndex, 'oilIndex:', oilIndex);
       setCalculatedPrice(null);
       setPriceDetails(null);
     }
   }, [rateData, selectedJob, distance, currentOilPrice]);
 
-  // Navigate to price calculator with selected truck
   const goToPriceCalculator = (truck: TruckType) => {
     setSelectedTruck(truck);
     setSelectedJob(truck.jobKey);
     setActiveTab('price');
   };
 
-  // CBM Calculations
   const calculateCBM = (item: CargoItem) => {
     return ((item.width * item.length * item.height) / 1000000) * item.quantity;
   };
@@ -381,14 +354,14 @@ const fetchOilPrice = useCallback(async () => {
       </div>
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* CBM Calculator Tab - DEFAULT */}
+        {/* CBM Calculator Tab */}
         {activeTab === 'cbm' && (
           <div className="space-y-6">
             {/* Truck Selection */}
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">🚛 เลือกประเภทรถ</h2>
-                <p className="text-blue-100 text-sm">เลือกรถแล้วกด "คำนวณราคา" เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
+                <p className="text-blue-100 text-sm">เลือกรถแล้วกด &quot;คำนวณราคา&quot; เพื่อไปหน้าคำนวณราคาอัตโนมัติ</p>
               </div>
               
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -431,7 +404,6 @@ const fetchOilPrice = useCallback(async () => {
                       <h3 className="font-bold text-gray-800">{truck.name}</h3>
                       <p className="text-sm text-gray-600">CBM: {truck.cbm} | น้ำหนัก: {truck.maxWeight.toLocaleString()} kg</p>
                       
-                      {/* Go to Price Calculator Button */}
                       <button
                         onClick={() => goToPriceCalculator(truck)}
                         className="mt-2 w-full py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-medium hover:from-green-600 hover:to-green-700 transition text-sm"
@@ -538,7 +510,6 @@ const fetchOilPrice = useCallback(async () => {
                 </div>
                 
                 <div className="p-6 space-y-4">
-                  {/* Summary */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-blue-50 rounded-lg p-4 text-center">
                       <p className="text-gray-600 text-sm">ปริมาตรรวม</p>
@@ -550,7 +521,6 @@ const fetchOilPrice = useCallback(async () => {
                     </div>
                   </div>
 
-                  {/* Capacity Bars */}
                   <div className="space-y-3">
                     <div>
                       <div className="flex justify-between text-sm mb-1">
@@ -592,7 +562,6 @@ const fetchOilPrice = useCallback(async () => {
                     </div>
                   </div>
 
-                  {/* Validation Messages */}
                   {!allItemsValid && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-yellow-800">
                       ⚠️ กรุณากรอกข้อมูลให้ครบทุกช่อง
@@ -627,7 +596,6 @@ const fetchOilPrice = useCallback(async () => {
                     </div>
                   )}
                   
-                  {/* Button to go to price calculator */}
                   <button
                     onClick={() => goToPriceCalculator(selectedTruck)}
                     className="w-full py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-bold hover:from-green-600 hover:to-green-700 transition"
@@ -638,7 +606,6 @@ const fetchOilPrice = useCallback(async () => {
               </div>
             )}
 
-            {/* Reset Button */}
             <button
               onClick={resetForm}
               className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300"
@@ -655,7 +622,7 @@ const fetchOilPrice = useCallback(async () => {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ดีเซล)
+                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
@@ -676,26 +643,50 @@ const fetchOilPrice = useCallback(async () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {oilPriceHistory.map((item, index) => (
-                          <tr
-                            key={item.date}
-                            className={`border-b ${
-                              index === 0 ? 'bg-blue-50 font-bold' : ''
-                            }`}
-                          >
-                            <td className="py-2 px-3 text-gray-700">
-                              {item.date}
-                              {index === 0 && (
-                                <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                                  ใช้คำนวณ
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-right text-gray-900">
-                              {item.price.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
+                        {oilPriceHistory.map((item, index) => {
+                          const prevPrice = index < oilPriceHistory.length - 1 ? oilPriceHistory[index + 1]?.price : null;
+                          const isToday = index === 0;
+                          const isPriceChanged = prevPrice !== null && item.price !== prevPrice;
+                          
+                          let priceChangeColor = '';
+                          if (isPriceChanged) {
+                            if (item.price < prevPrice) {
+                              priceChangeColor = 'bg-green-500';
+                            } else if (item.price > prevPrice) {
+                              priceChangeColor = 'bg-red-500';
+                            }
+                          }
+                          
+                          return (
+                            <tr
+                              key={item.date}
+                              className={`border-b ${
+                                isToday ? 'bg-blue-50 font-bold' : ''
+                              }`}
+                            >
+                              <td className="py-2 px-3 text-gray-700">
+                                <div className="flex items-center gap-2">
+                                  <span>{item.date}</span>
+                                  {isPriceChanged && !isToday && (
+                                    <span className={`${priceChangeColor} text-white text-xs px-2 py-0.5 rounded`}>
+                                      ปรับราคา
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <span className="text-gray-900">{item.price.toFixed(2)}</span>
+                                  {isToday && (
+                                    <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
+                                      ใช้คำนวณ
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -725,7 +716,6 @@ const fetchOilPrice = useCallback(async () => {
               </div>
               
               <div className="p-6 space-y-6">
-                {/* Job Selection */}
                 <div>
                   <label className="block text-gray-700 font-medium mb-2">
                     ประเภทงาน <span className="text-red-500">*</span>
@@ -741,7 +731,6 @@ const fetchOilPrice = useCallback(async () => {
                   </select>
                 </div>
 
-                {/* Distance Input */}
                 <div>
                   <label className="block text-gray-700 font-medium mb-2">
                     ระยะทาง <span className="text-red-500">*</span>
@@ -758,7 +747,6 @@ const fetchOilPrice = useCallback(async () => {
                   </div>
                 </div>
 
-                {/* Result */}
                 {calculatedPrice !== null && priceDetails ? (
                   <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-xl p-6 border-2 border-blue-200">
                     <div className="text-center">
@@ -780,14 +768,11 @@ const fetchOilPrice = useCallback(async () => {
                 ) : distance && rateData && !calculatedPrice ? (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
                     ❌ ไม่พบราคาสำหรับระยะทาง {distance} กม.
-                    <br />
-                    <span className="text-sm">หรือข้อมูลอัตราค่าขนส่งไม่ครบถ้วน</span>
                   </div>
                 ) : null}
               </div>
             </div>
             
-            {/* Back to CBM Button */}
             <button
               onClick={() => setActiveTab('cbm')}
               className="w-full py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
