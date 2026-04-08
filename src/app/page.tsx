@@ -417,17 +417,22 @@ export default function Home() {
             </div>
 
             {/* Cargo Items */}
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
-                <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-                <p className="text-blue-100 text-sm">สามารถใส่รายการสินค้าได้มากกว่า 1 โดยกดปุ่ม &quot;+ เพิ่มรายการ; จะมีรายการเพิ่มด้านล่างอัตโนมัติ</p>
-                <button
-                  onClick={addCargoItem}
-                  className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
-                >
-                  + เพิ่มรายการ
-                </button>
-              </div>
+            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-start">
+             <div>
+               <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
+               <p className="text-sm text-yellow-100 mt-1 leading-relaxed">
+                 สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ <br />
+                 โดยกดปุ่ม "+ เพิ่มรายการ" จะมีรายการเพิ่มด้านล่างอัตโนมัติ
+               </p>
+             </div>
+
+             <button
+               onClick={addCargoItem}
+               className="bg-white text-orange-600 px-3 py-1 rounded-lg font-medium hover:bg-orange-50"
+             >
+               + เพิ่มรายการ
+            </button>
+           </div>
               
               <div className="p-4 space-y-4">
                 {cargoItems.map((item, index) => (
@@ -644,42 +649,71 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody>
-                        {oilPriceHistory.map((item, index) => {
-                          const prevPrice = index < oilPriceHistory.length - 1 ? oilPriceHistory[index + 1]?.price : null;
-                          const isToday = index === 0;
-                          const isPriceChanged = prevPrice !== null && item.price !== prevPrice;
-                          
-                          return (
-                            <tr
-                              key={item.date}
-                              className={`border-b ${
-                                isToday ? 'bg-blue-50 font-bold' : ''
-                              }`}
-                            >
-                              <td className="py-2 px-3 text-gray-700">
-                                <div className="flex items-center gap-2">
-                                  <span>{item.date}</span>
-                                  {isPriceChanged && !isToday && (
-                                    <span className="text-red-500 text-xs font-normal">
-                                      ปรับราคา
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  <span className="text-gray-900">{item.price.toFixed(2)}</span>
-                                  {isToday && (
-                                    <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
-                                      ใช้คำนวณ
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
+  {oilPriceHistory.map((item, index) => {
+    const prevPrice =
+      index < oilPriceHistory.length - 1
+        ? oilPriceHistory[index + 1]?.price
+        : null;
+
+    const isToday = index === 0;
+    const isPriceChanged =
+      prevPrice !== null && item.price !== prevPrice;
+
+    const isIncrease =
+      prevPrice !== null && item.price > prevPrice;
+
+    const isDecrease =
+      prevPrice !== null && item.price < prevPrice;
+
+    return (
+      <tr
+        key={item.date}
+        className={`border-b ${isToday ? 'bg-blue-50 font-bold' : ''}`}
+      >
+        <td colSpan={2} className="py-2 px-3">
+          <div className="flex items-center justify-between">
+
+            {/* 1. วันที่ (ซ้ายสุด) */}
+            <div className="w-1/4 text-left text-gray-700">
+              {item.date}
+            </div>
+
+            {/* 2. [ปรับราคา] (กลางซ้าย) */}
+            <div className="w-1/4 text-left">
+              {!isToday && isPriceChanged && (
+                <span
+                  className={`text-xs font-medium flex items-center gap-1
+                    ${isIncrease ? 'text-red-500' : ''}
+                    ${isDecrease ? 'text-green-500' : ''}
+                  `}
+                >
+                  {isIncrease && <span>▲</span>}
+                  {isDecrease && <span>▼</span>}
+                  ปรับราคา
+                </span>
+              )}
+            </div>
+
+            {/* 3. [ใช้คำนวณ] (กลางขวา) */}
+            <div className="w-1/4 text-right">
+              {isToday && (
+                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
+                  ใช้คำนวณ
+                </span>
+              )}
+            </div>
+
+            {/* 4. ราคา (ขวาสุด) */}
+            <div className="w-1/4 text-right text-gray-900">
+              {item.price.toFixed(2)}
+            </div>
+
+          </div>
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
                     </table>
                   </div>
                 ) : (
