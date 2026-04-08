@@ -1,7 +1,53 @@
 import { NextResponse } from 'next/server';
-import { get, put } from '@vercel/edge-config';
+import { get } from '@vercel/edge-config';
 
 const HISTORY_KEY = 'oil-price-history';
+const FALLBACK_PRICE = 50.54;
+
+// ===== EDGE CONFIG REST API (สำหรับเขียนข้อมูล) =====
+async function saveToEdgeConfig(history: { date: string; price: number }[]): Promise<boolean> {
+  const edgeConfigId = process.env.EDGE_CONFIG_ID;
+  const apiToken = process.env.VERCEL_API_TOKEN;
+
+  if (!edgeConfigId || !apiToken) {
+    console.error('Missing EDGE_CONFIG_ID or VERCEL_API_TOKEN');
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.vercel.com/v1/edge-config/${edgeConfigId}/items`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              operation: 'upsert',
+              key: HISTORY_KEY,
+              value: history,
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Edge Config API error:', error);
+      return false;
+    }
+
+    console.log('Saved to Edge Config successfully');
+    return true;
+  } catch (error) {
+    console.error('Edge Config save error:', error);
+    return false;
+  }
+}
 
 // ===== BANGCHAK API =====
 async function fetchOilPrice(): Promise<{ date: string; price: number } | null> {
@@ -56,7 +102,7 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
 
 // ===== CRON HANDLER =====
 export async function GET(request: Request) {
-  // Verify authorization (ป้องกันการเรียกจากคนภายนอก)
+  // Verify authorization
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -75,7 +121,7 @@ export async function GET(request: Request) {
       }, { status: 500 });
     }
 
-    // 2. Get existing history
+    // 2. Get existing history from Edge Config (ใช้ get จาก @vercel/edge-config)
     let history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
     // 3. Check if this date already exists
@@ -85,18 +131,25 @@ export async function GET(request: Request) {
       // 4. Add new price at the top, keep only 5
       history = [currentPrice, ...history].slice(0, 5);
       
-      // 5. Save to Edge Config
-      await put(HISTORY_KEY, history);
+      // 5. Save to Edge Config using REST API
+      const saved = await saveToEdgeConfig(history);
       
-      console.log('Oil price saved:', currentPrice);
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Oil price saved successfully',
-        date: currentPrice.date,
-        price: currentPrice.price,
-        history: history,
-      });
+      if (saved) {
+        console.log('Oil price saved:', currentPrice);
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Oil price saved successfully',
+          date: currentPrice.date,
+          price: currentPrice.price,
+          history: history,
+        });
+      } else {
+        return NextResponse.json({
+          success: false,
+          error: 'Failed to save to Edge Config',
+        }, { status: 500 });
+      }
     }
     
     return NextResponse.json({
