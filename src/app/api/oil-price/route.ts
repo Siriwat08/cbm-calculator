@@ -1,27 +1,8 @@
 import { NextResponse } from 'next/server';
-import { get, put } from '@vercel/edge-config';
+import { get } from '@vercel/edge-config';
 
 const FALLBACK_PRICE = 50.54;
 const HISTORY_KEY = 'oil-price-history';
-
-// ===== EDGE CONFIG HELPERS =====
-async function getHistory(): Promise<{ date: string; price: number }[]> {
-  try {
-    const history = await get<{ date: string; price: number }[]>(HISTORY_KEY);
-    return history || [];
-  } catch (error) {
-    console.error('Edge Config get error:', error);
-    return [];
-  }
-}
-
-async function saveHistory(history: { date: string; price: number }[]): Promise<void> {
-  try {
-    await put(HISTORY_KEY, history);
-  } catch (error) {
-    console.error('Edge Config put error:', error);
-  }
-}
 
 // ===== BANGCHAK API =====
 async function fetchFromBangchak(): Promise<{ date: string; price: number } | null> {
@@ -45,7 +26,6 @@ async function fetchFromBangchak(): Promise<{ date: string; price: number } | nu
     );
 
     if (diesel) {
-      // ดึงวันที่มีผลจาก OilRemark2
       const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
       let effectiveDate = oilData.OilPriceDate;
       
@@ -80,37 +60,34 @@ export async function GET() {
     // 1. Get current price from Bangchak
     const currentPrice = await fetchFromBangchak();
     
-    // 2. Get existing history from Edge Config
-    let history = await getHistory();
+    // 2. Get history from Edge Config
+    const history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
-    // 3. If we have new price, add to history
-    if (currentPrice) {
-      const exists = history.some(h => h.date === currentPrice.date);
-      
-      if (!exists) {
-        // Add new price at the top, keep only 5
-        history = [currentPrice, ...history].slice(0, 5);
-        
-        // Save to Edge Config
-        await saveHistory(history);
-      }
-    }
-    
-    // 4. Return response
+    // 3. Return response
     if (history.length > 0) {
       return NextResponse.json({
         date: history[0].date,
         price: history[0].price,
         history: history,
+        source: 'edge-config',
+      });
+    }
+    
+    // 4. Fallback: use current price if no history
+    if (currentPrice) {
+      return NextResponse.json({
+        date: currentPrice.date,
+        price: currentPrice.price,
+        history: [currentPrice],
         source: 'bangchak-api',
       });
     }
     
-    // Fallback if no history
+    // 5. Final fallback
     return NextResponse.json({
       date: new Date().toLocaleDateString('th-TH'),
       price: FALLBACK_PRICE,
-      history: [{ date: new Date().toLocaleDateString('th-TH'), price: FALLBACK_PRICE }],
+      history: [],
       source: 'fallback',
     });
 
@@ -122,7 +99,6 @@ export async function GET() {
       price: FALLBACK_PRICE,
       history: [],
       source: 'fallback',
-      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 }
