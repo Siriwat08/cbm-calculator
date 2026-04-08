@@ -98,7 +98,7 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
   }
 }
 
-// ===== CRON HANDLER (ไม่มี Authorization Check) =====
+// ===== CRON HANDLER =====
 export async function GET() {
   console.log('Cron job started at:', new Date().toISOString());
   
@@ -116,40 +116,39 @@ export async function GET() {
     // 2. Get existing history
     let history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
-    // 3. Check if this date already exists
-    const exists = history.some(h => h.date === currentPrice.date);
+    // 3. ✅ บันทึกทุกวัน แม้ราคาจะเหมือนเดิม
+    // ตรวจสอบว่าวันที่นี้มีใน history แล้วหรือยัง
+    const existingIndex = history.findIndex(h => h.date === currentPrice.date);
     
-    if (!exists) {
-      // 4. Add new price at the top, keep only 5
-      history = [currentPrice, ...history].slice(0, 5);
-      
-      // 5. Save to Edge Config
-      const saved = await saveToEdgeConfig(history);
-      
-      if (saved) {
-        console.log('Oil price saved:', currentPrice);
-        
-        return NextResponse.json({
-          success: true,
-          message: 'Oil price saved successfully',
-          date: currentPrice.date,
-          price: currentPrice.price,
-          history: history,
-        });
-      } else {
-        return NextResponse.json({
-          success: false,
-          error: 'Failed to save to Edge Config',
-        }, { status: 500 });
-      }
+    if (existingIndex === -1) {
+      // วันที่ยังไม่มี → เพิ่มใหม่ด้านบน
+      history = [currentPrice, ...history].slice(0, 10); // เก็บ 10 วัน
+      console.log('Adding new date:', currentPrice.date);
+    } else {
+      // วันที่มีแล้ว → อัพเดทราคา
+      history[existingIndex] = currentPrice;
+      console.log('Updated price for:', currentPrice.date);
     }
     
-    return NextResponse.json({
-      success: true,
-      message: 'Oil price already exists for today',
-      date: currentPrice.date,
-      price: currentPrice.price,
-    });
+    // 4. Save to Edge Config
+    const saved = await saveToEdgeConfig(history);
+    
+    if (saved) {
+      console.log('Oil price history saved:', history.length, 'days');
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Oil price saved successfully',
+        date: currentPrice.date,
+        price: currentPrice.price,
+        history: history,
+      });
+    } else {
+      return NextResponse.json({
+        success: false,
+        error: 'Failed to save to Edge Config',
+      }, { status: 500 });
+    }
 
   } catch (error) {
     console.error('Cron error:', error);
