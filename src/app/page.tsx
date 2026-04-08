@@ -421,7 +421,7 @@ export default function Home() {
               <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-                  <p className="text-yellow-100 text-xs">สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot;</p>
+                  <p className="text-yellow-100 text-xs">สามารถเลือก รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot; จะมีรายการเพิ่มด้านล่างอัตโนมัติ </p>
                 </div>
                 <button
                   onClick={addCargoItem}
