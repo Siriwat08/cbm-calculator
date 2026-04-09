@@ -70,11 +70,11 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     );
 
     if (diesel) {
-      // ✅ ใช้วันที่ปัจจุบัน
+      // ✅ ใช้วันที่ปัจจุบัน (บังคับให้บันทึกทุกวัน)
       const today = new Date();
       const day = today.getDate().toString().padStart(2, '0');
       const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const year = (today.getFullYear() + 543).toString();
+      const year = (today.getFullYear() + 543).toString(); // แปลงเป็น พ.ศ.
       const currentDate = `${day}/${month}/${year}`;
       
       return { date: currentDate, price: diesel.PriceToday };
@@ -92,6 +92,7 @@ export async function GET() {
   console.log('Cron job started at:', new Date().toISOString());
   
   try {
+    // 1. Fetch current price
     const currentPrice = await fetchOilPrice();
     
     if (!currentPrice) {
@@ -101,18 +102,23 @@ export async function GET() {
       }, { status: 500 });
     }
 
+    // 2. Get existing history
     let history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
+    // 3. ✅ เช็ค "วันที่" แทน "ราคา" (บันทึกทุกวัน)
     const existingIndex = history.findIndex(h => h.date === currentPrice.date);
     
     if (existingIndex === -1) {
-      history = [currentPrice, ...history].slice(0, 10);
+      // วันที่ยังไม่มี → เพิ่มใหม่ด้านบน
+      history = [currentPrice, ...history].slice(0, 10); // เก็บ 10 วัน
       console.log('Adding new date:', currentPrice.date);
     } else {
+      // วันที่มีแล้ว → อัพเดทราคา (กรณีราคาเปลี่ยนในวันเดียวกัน)
       history[existingIndex] = currentPrice;
       console.log('Updated price for:', currentPrice.date);
     }
     
+    // 4. Save to Edge Config
     const saved = await saveToEdgeConfig(history);
     
     if (saved) {
