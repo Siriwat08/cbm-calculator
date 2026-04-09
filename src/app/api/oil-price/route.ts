@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { get } from '@vercel/edge-config';
 
-const HISTORY_KEY = 'oil-price-history';
 const FALLBACK_PRICE = 50.54;
+const HISTORY_KEY = 'oil-price-history';
 
 // ===== BANGCHAK API =====
 async function fetchFromBangchak(): Promise<{ date: string; price: number } | null> {
@@ -26,14 +26,25 @@ async function fetchFromBangchak(): Promise<{ date: string; price: number } | nu
     );
 
     if (diesel) {
-      // ใช้วันที่ปัจจุบัน (สำหรับ Key ในการค้นหา)
-      const today = new Date();
-      const day = today.getDate().toString().padStart(2, '0');
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const year = (today.getFullYear() + 543).toString();
-      const currentDate = `${day}/${month}/${year}`;
+      const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
+      let effectiveDate = oilData.OilPriceDate;
       
-      return { date: currentDate, price: diesel.PriceToday };
+      if (remarkMatch) {
+        const day = remarkMatch[1].padStart(2, '0');
+        const thaiMonth = remarkMatch[2];
+        
+        const months: { [key: string]: string } = {
+          'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
+          'พ.ค.': '05', 'มิ.ย.': '06', 'ก.ค.': '07', 'ส.ค.': '08',
+          'ก.ย.': '09', 'ต.ค.': '10', 'พ.ย.': '11', 'ธ.ค.': '12'
+        };
+        
+        const month = months[thaiMonth] || '01';
+        const year = remarkMatch[3];
+        effectiveDate = `${day}/${month}/${year}`;
+      }
+      
+      return { date: effectiveDate, price: diesel.PriceToday };
     }
     
     return null;
@@ -46,10 +57,13 @@ async function fetchFromBangchak(): Promise<{ date: string; price: number } | nu
 // ===== MAIN HANDLER =====
 export async function GET() {
   try {
-    // 1. Get history from Edge Config (ข้อมูลหลัก)
+    // 1. Get current price from Bangchak
+    const currentPrice = await fetchFromBangchak();
+    
+    // 2. Get history from Edge Config
     const history = await get<{ date: string; price: number }[]>(HISTORY_KEY) || [];
     
-    // 2. Return history
+    // 3. Return response
     if (history.length > 0) {
       return NextResponse.json({
         date: history[0].date,
@@ -59,9 +73,7 @@ export async function GET() {
       });
     }
     
-    // 3. Fallback: Fetch from Bangchak if no history
-    const currentPrice = await fetchFromBangchak();
-    
+    // 4. Fallback: use current price if no history
     if (currentPrice) {
       return NextResponse.json({
         date: currentPrice.date,
@@ -71,7 +83,7 @@ export async function GET() {
       });
     }
     
-    // 4. Final fallback
+    // 5. Final fallback
     return NextResponse.json({
       date: new Date().toLocaleDateString('th-TH'),
       price: FALLBACK_PRICE,
