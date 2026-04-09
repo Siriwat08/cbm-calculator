@@ -421,7 +421,7 @@ export default function Home() {
               <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-                  <p className="text-yellow-100 text-xs">สามารถเลือก รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot; จะมีรายการเพิ่มด้านล่างอัตโนมัติ </p>
+                  <p className="text-yellow-100 text-xs">สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot;</p>
                 </div>
                 <button
                   onClick={addCargoItem}
@@ -432,7 +432,6 @@ export default function Home() {
               </div>
               
               <div className="p-4 space-y-4">
-                {/* แต่ละรายการอยู่คนละบรรทัด */}
                 {cargoItems.map((item, index) => (
                   <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="flex justify-between items-center mb-3">
@@ -634,7 +633,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ดีเซล)
+                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
@@ -651,7 +650,7 @@ export default function Home() {
                       <thead>
                         <tr className="bg-gray-50">
                           <th className="text-left py-2 px-2 text-gray-600 font-medium w-24">วันที่</th>
-                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-20">สถานะ</th>
+                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-24">สถานะ</th>
                           <th className="text-center py-2 px-2 text-gray-600 font-medium w-24">ใช้คำนวณ</th>
                           <th className="text-right py-2 px-2 text-gray-600 font-medium">ราคา (บาท)</th>
                         </tr>
@@ -671,23 +670,20 @@ export default function Home() {
                                 isToday ? 'bg-blue-50' : ''
                               }`}
                             >
-                              {/* Column 1: วันที่ - ชิดซ้าย */}
                               <td className="py-2 px-2 text-gray-700 font-medium">
                                 {item.date}
                               </td>
                               
-                              {/* Column 2: สถานะปรับราคา - กลางชิดซ้าย */}
                               <td className="py-2 px-2">
                                 {isPriceChanged && !isToday && (
                                   <span className={`font-medium text-sm ${
                                     priceDecreased ? 'text-green-600' : 'text-red-600'
                                   }`}>
-                                    {priceDecreased ? '▼ ปรับราคา' : '▲ ปรับราคา'}
+                                    {priceDecreased ? '▼ ลดลง' : '▲ เพิ่มขึ้น'}
                                   </span>
                                 )}
                               </td>
                               
-                              {/* Column 3: ใช้คำนวณ - กลางชิดขวา */}
                               <td className="py-2 px-2 text-center">
                                 {isToday && (
                                   <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded font-medium">
@@ -696,7 +692,6 @@ export default function Home() {
                                 )}
                               </td>
                               
-                              {/* Column 4: ราคา - ชิดขวา */}
                               <td className={`py-2 px-2 text-right font-bold ${
                                 isToday ? 'text-blue-600 text-lg' : 'text-gray-900'
                               }`}>
