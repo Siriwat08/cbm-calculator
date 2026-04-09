@@ -421,7 +421,7 @@ export default function Home() {
               <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-6 py-4 flex justify-between items-center">
                 <div>
                   <h2 className="text-lg font-bold">📦 รายการสินค้า</h2>
-                  <p className="text-yellow-100 text-xs">สามารถใส่รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot;</p>
+                  <p className="text-yellow-100 text-xs">สามารถเลือก รายการสินค้าได้มากกว่า 1 รายการ โดยกดปุ่ม &quot;+ เพิ่มรายการ&quot; จะมีรายการเพิ่มด้านล่างอัตโนมัติ </p>
                 </div>
                 <button
                   onClick={addCargoItem}
@@ -432,8 +432,9 @@ export default function Home() {
               </div>
               
               <div className="p-4 space-y-4">
+                {/* แต่ละรายการอยู่คนละบรรทัด แยกกันชัดเจน */}
                 {cargoItems.map((item, index) => (
-                  <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200 block w-full">
                     <div className="flex justify-between items-center mb-3">
                       <span className="font-bold text-gray-800 bg-blue-100 px-3 py-1 rounded">
                         รายการที่ {index + 1}
@@ -621,7 +622,7 @@ export default function Home() {
               onClick={resetForm}
               className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300"
             >
-              🔄 รีเซ็ตข้อมูล
+               รีเซ็ตข้อมูล
             </button>
           </div>
         )}
@@ -633,7 +634,7 @@ export default function Home() {
             <div className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
                 <h2 className="text-lg font-bold flex items-center gap-2">
-                  ⛽ ราคาน้ำมันดีเซล (ไฮดีเซล S)
+                  ⛽ ราคาน้ำมันดีเซล (ดีเซล)
                 </h2>
                 <p className="text-green-100 text-sm">อ้างอิง: ปตท.</p>
               </div>
@@ -646,53 +647,63 @@ export default function Home() {
                   </div>
                 ) : oilPriceHistory.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
+                    <table className="w-full table-fixed">
                       <thead>
                         <tr className="bg-gray-50">
-                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-24">วันที่</th>
-                          <th className="text-left py-2 px-2 text-gray-600 font-medium w-24">สถานะ</th>
-                          <th className="text-center py-2 px-2 text-gray-600 font-medium w-24">ใช้คำนวณ</th>
-                          <th className="text-right py-2 px-2 text-gray-600 font-medium">ราคา (บาท)</th>
+                          <th className="text-left py-2 px-3 text-gray-600 font-medium w-1/4">วันที่</th>
+                          <th className="text-center py-2 px-3 text-gray-600 font-medium w-1/4">สถานะ</th>
+                          <th className="text-center py-2 px-3 text-gray-600 font-medium w-1/4">ใช้คำนวณ</th>
+                          <th className="text-right py-2 px-3 text-gray-600 font-medium w-1/4">ราคา (บาท)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {oilPriceHistory.map((item, index) => {
-                          const prevPrice = index < oilPriceHistory.length - 1 ? oilPriceHistory[index + 1]?.price : null;
+                          let statusText = '';
+                          let statusColor = '';
+                          
+                          if (index < oilPriceHistory.length - 1) {
+                            const prevPrice = oilPriceHistory[index + 1].price;
+                            const diff = item.price - prevPrice;
+                            
+                            if (diff > 0) {
+                              statusText = `▲ เพิ่มขึ้น`;
+                              statusColor = 'text-red-500';
+                            } else if (diff < 0) {
+                              statusText = `▼ ลดลง`;
+                              statusColor = 'text-green-500';
+                            }
+                          }
+
                           const isToday = index === 0;
-                          const isPriceChanged = prevPrice !== null && item.price !== prevPrice;
-                          const priceDecreased = isPriceChanged && item.price < (prevPrice || 0);
-                          const priceIncreased = isPriceChanged && item.price > (prevPrice || 0);
                           
                           return (
                             <tr
                               key={item.date}
                               className={`border-b ${
-                                isToday ? 'bg-blue-50' : ''
+                                isToday ? 'bg-blue-50 font-bold' : ''
                               }`}
                             >
-                              <td className="py-2 px-2 text-gray-700 font-medium">
+                              {/* Column 1: วันที่ - ชิดซ้าย */}
+                              <td className="py-2 px-3 text-left text-gray-700">
                                 {item.date}
                               </td>
                               
-                              <td className="py-2 px-2">
-                                {isPriceChanged && !isToday && (
-                                  <span className={`font-medium text-sm ${
-                                    priceDecreased ? 'text-green-600' : 'text-red-600'
-                                  }`}>
-                                    {priceDecreased ? '▼ ลดลง' : '▲ เพิ่มขึ้น'}
-                                  </span>
-                                )}
+                              {/* Column 2: สถานะปรับราคา - กลางชิดซ้าย */}
+                              <td className={`py-2 px-3 text-center text-sm font-medium ${statusColor}`}>
+                                {statusText}
                               </td>
                               
-                              <td className="py-2 px-2 text-center">
+                              {/* Column 3: ใช้คำนวณ - กลางชิดขวา */}
+                              <td className="py-2 px-3 text-center">
                                 {isToday && (
-                                  <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded font-medium">
+                                  <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded">
                                     ใช้คำนวณ
                                   </span>
                                 )}
                               </td>
                               
-                              <td className={`py-2 px-2 text-right font-bold ${
+                              {/* Column 4: ราคา - ชิดขวา */}
+                              <td className={`py-2 px-3 text-right ${
                                 isToday ? 'text-blue-600 text-lg' : 'text-gray-900'
                               }`}>
                                 {item.price.toFixed(2)}
@@ -794,46 +805,32 @@ export default function Home() {
             </button>
           </div>
         )}
-      </main>
 
-      {/* Image Popup */}
-      {showPopup && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowPopup(false)}
-        >
-          <div className="relative max-w-4xl max-h-[90vh]">
-            <button
-              onClick={() => setShowPopup(false)}
-              className="absolute -top-10 right-0 text-white text-3xl hover:text-gray-300"
-            >
-              ✕
-            </button>
-            <Image
-              src={popupImage}
-              alt="Truck Image"
-              width={800}
-              height={600}
-              className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            />
+        {/* Popups */}
+        {showPopup && (
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowPopup(false)}
+          >
+            <div className="relative max-w-2xl w-full max-h-[90vh] overflow-hidden rounded-xl bg-white p-2">
+              <button 
+                onClick={() => setShowPopup(false)}
+                className="absolute top-4 right-4 z-10 bg-black bg-opacity-50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-500 transition"
+              >
+                ✕
+              </button>
+              <div className="relative w-full h-[80vh]">
+                <Image
+                  src={popupImage}
+                  alt="รายละเอียดรถ"
+                  fill
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Footer */}
-      <footer className="bg-gray-800 text-white py-6 px-4 mt-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <Image
-            src="/images/3_20251016_054221_0002.png"
-            alt="เผ่าปัญญา ทรานสปอร์ต"
-            width={50}
-            height={50}
-            className="mx-auto rounded-full mb-2"
-          />
-          <p className="font-bold">หจก.เผ่าปัญญา ทรานสปอร์ต</p>
-          <p className="text-gray-400 text-sm mt-1">สงวนลิขสิทธิ์ © {new Date().getFullYear()}</p>
-        </div>
-      </footer>
+        )}
+      </main>
     </div>
   );
 }
