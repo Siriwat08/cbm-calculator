@@ -1,4 +1,4 @@
---- src/app/page.tsx (原始)
+--- src/app/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
