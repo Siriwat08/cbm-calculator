@@ -115,7 +115,11 @@ async function fetchFromBangchak(): Promise<{ date: string; price: number } | nu
         };
 
         const month = months[thaiMonth] || '01';
-        const buddhistYear = remarkMatch[3];
+        let buddhistYear = remarkMatch[3];
+        // Handle 2-digit Buddhist year (e.g. "69" means 2569)
+        if (buddhistYear.length <= 2) {
+          buddhistYear = '25' + buddhistYear.padStart(2, '0');
+        }
         // Convert Buddhist year to Christian year for ISO format
         const christianYear = parseInt(buddhistYear) - 543;
         effectiveDate = `${christianYear}-${month}-${day}`;

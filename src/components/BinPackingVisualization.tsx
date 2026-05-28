@@ -11,34 +11,36 @@ interface BinPackingVisualizationProps {
 
 // Color palette for different cargo items
 const CARGO_COLORS = [
-  { bg: 'rgba(59, 130, 246, 0.7)', border: 'rgb(37, 99, 235)', label: 'สินค้า 1' },   // blue
-  { bg: 'rgba(16, 185, 129, 0.7)', border: 'rgb(5, 150, 105)', label: 'สินค้า 2' },   // emerald
-  { bg: 'rgba(245, 158, 11, 0.7)', border: 'rgb(217, 119, 6)', label: 'สินค้า 3' },    // amber
-  { bg: 'rgba(239, 68, 68, 0.7)', border: 'rgb(220, 38, 38)', label: 'สินค้า 4' },    // red
-  { bg: 'rgba(139, 92, 246, 0.7)', border: 'rgb(109, 40, 217)', label: 'สินค้า 5' },   // violet
-  { bg: 'rgba(236, 72, 153, 0.7)', border: 'rgb(190, 24, 93)', label: 'สินค้า 6' },   // pink
-  { bg: 'rgba(20, 184, 166, 0.7)', border: 'rgb(13, 148, 136)', label: 'สินค้า 7' },   // teal
-  { bg: 'rgba(249, 115, 22, 0.7)', border: 'rgb(234, 88, 12)', label: 'สินค้า 8' },    // orange
+  { fill: '#3B82F6', stroke: '#1D4ED8', light: '#60A5FA', label: 'สินค้า 1' },   // blue
+  { fill: '#10B981', stroke: '#047857', light: '#34D399', label: 'สินค้า 2' },   // emerald
+  { fill: '#F59E0B', stroke: '#B45309', light: '#FBBF24', label: 'สินค้า 3' },    // amber
+  { fill: '#EF4444', stroke: '#B91C1C', light: '#F87171', label: 'สินค้า 4' },    // red
+  { fill: '#8B5CF6', stroke: '#6D28D9', light: '#A78BFA', label: 'สินค้า 5' },   // violet
+  { fill: '#EC4899', stroke: '#BE185D', light: '#F472B6', label: 'สินค้า 6' },   // pink
+  { fill: '#14B8A6', stroke: '#0D9488', light: '#2DD4BF', label: 'สินค้า 7' },   // teal
+  { fill: '#F97316', stroke: '#C2410C', light: '#FB923C', label: 'สินค้า 8' },    // orange
 ];
 
+type ViewMode = 'rear' | 'top' | 'side' | '3d';
+
 export default function BinPackingVisualization({ result, truck, cargoItems }: BinPackingVisualizationProps) {
-  const [viewAngle, setViewAngle] = useState<'front' | 'top' | 'side' | '3d'>('3d');
+  const [viewAngle, setViewAngle] = useState<ViewMode>('rear');
   const [showLabels, setShowLabels] = useState(true);
 
   // Convert truck dimensions to cm
-  const truckW = truck.dimensions.width * 100;
-  const truckL = truck.dimensions.length * 100;
-  const truckH = truck.dimensions.height * 100;
+  const truckW = truck.dimensions.width * 100;  // left-right
+  const truckL = truck.dimensions.length * 100;  // front-back (depth)
+  const truckH = truck.dimensions.height * 100;  // top-bottom
 
-  // Scale factor: fit the truck into a ~400px view
+  // Scale: fit into SVG viewport
   const maxDim = Math.max(truckW, truckL, truckH);
-  const scale = 380 / maxDim;
+  const scale = 300 / maxDim;
 
-  const scaledTruckW = truckW * scale;
-  const scaledTruckL = truckL * scale;
-  const scaledTruckH = truckH * scale;
+  const sW = truckW * scale;
+  const sL = truckL * scale;
+  const sH = truckH * scale;
 
-  // Group packed items by cargo index for coloring
+  // Group items by cargo index for coloring
   const cargoColorMap = new Map<number, number>();
   let colorIdx = 0;
   result.items.forEach(item => {
@@ -48,20 +50,13 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     }
   });
 
-  // Build placement data with labels
+  // Build placement data
   interface PlacementInfo {
-    x: number;
-    y: number;
-    z: number;
-    w: number;
-    l: number;
-    h: number;
-    cargoIndex: number;
-    colorIdx: number;
+    x: number; y: number; z: number;
+    w: number; l: number; h: number;
+    cargoIndex: number; colorIdx: number;
     label: string;
-    origW: number;
-    origL: number;
-    origH: number;
+    origW: number; origL: number; origH: number;
   }
 
   const placements: PlacementInfo[] = result.items.map(item => {
@@ -83,136 +78,284 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     };
   });
 
-  // 3D CSS transform based on view angle
-  const getContainerStyle = (): React.CSSProperties => {
-    const base: React.CSSProperties = {
-      width: scaledTruckW,
-      height: scaledTruckL,
-      position: 'relative' as const,
-    };
+  // Calculate remaining space info
+  const totalItemsVolume = placements.reduce((sum, p) => sum + (p.w * p.l * p.h), 0);
+  const truckVolume = sW * sL * sH;
+  const usedPercent = truckVolume > 0 ? (totalItemsVolume / truckVolume * 100) : 0;
+  const freePercent = 100 - usedPercent;
 
-    if (viewAngle === '3d') {
-      return {
-        ...base,
-        transform: 'perspective(800px) rotateX(-25deg) rotateY(25deg)',
-        transformStyle: 'preserve-3d' as const,
-      };
-    }
-    return base;
-  };
+  // ============ SVG RENDERING ============
+  // Common padding
+  const pad = 30;
 
-  // Render item box
-  const renderItem = (placement: PlacementInfo, idx: number) => {
-    const color = CARGO_COLORS[placement.colorIdx];
-    const itemStyle: React.CSSProperties = viewAngle === '3d'
-      ? {
-          position: 'absolute',
-          left: placement.x,
-          top: placement.y,
-          width: placement.w,
-          height: placement.l,
-          backgroundColor: color.bg,
-          border: `2px solid ${color.border}`,
-          transform: `translateZ(${placement.z}px)`,
-          transformStyle: 'preserve-3d',
-          borderRadius: '2px',
-        }
-      : {
-          position: 'absolute',
-          backgroundColor: color.bg,
-          border: `2px solid ${color.border}`,
-          borderRadius: '2px',
-        };
-
-    // Adjust positioning based on view
-    if (viewAngle === 'top') {
-      // Top view: x = left->right, y = front->back (length)
-      Object.assign(itemStyle, {
-        left: placement.x,
-        top: placement.y,
-        width: placement.w,
-        height: placement.l,
-      });
-    } else if (viewAngle === 'front') {
-      // Front view: x = left->right, z = bottom->top
-      Object.assign(itemStyle, {
-        left: placement.x,
-        bottom: placement.z,
-        width: placement.w,
-        height: placement.h,
-      });
-    } else if (viewAngle === 'side') {
-      // Side view: y = left->right, z = bottom->top
-      Object.assign(itemStyle, {
-        left: placement.y,
-        bottom: placement.z,
-        width: placement.l,
-        height: placement.h,
-      });
-    }
+  // --- Rear View (looking from the back into the truck) ---
+  // Shows: width (left-right) x height (bottom-top)
+  // Items are drawn back-to-front (deeper items first, closer items on top)
+  const renderRearView = () => {
+    const svgW = sW + pad * 2;
+    const svgH = sH + pad * 2;
+    // Sort by depth (y) - items further back drawn first
+    const sorted = [...placements].sort((a, b) => a.y - b.y);
 
     return (
-      <div
-        key={idx}
-        style={itemStyle}
-        className="group cursor-pointer transition-all hover:brightness-110 hover:z-10"
-        title={`${placement.label}: ${placement.origW}×${placement.origL}×${placement.origH} ซม.`}
-      >
-        {showLabels && (placement.w > 25 && placement.l > 15) && (
-          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-            <span className="text-[8px] font-bold text-white drop-shadow-sm leading-tight text-center px-0.5">
-              {placement.label}
-            </span>
-          </div>
-        )}
-        {/* 3D top face */}
-        {viewAngle === '3d' && (
-          <div
-            style={{
-              position: 'absolute',
-              width: placement.w,
-              height: placement.h,
-              bottom: '100%',
-              left: 0,
-              backgroundColor: color.bg,
-              border: `1px solid ${color.border}`,
-              transform: 'rotateX(90deg)',
-              transformOrigin: 'bottom',
-              opacity: 0.85,
-            }}
-          />
-        )}
-        {/* 3D right face */}
-        {viewAngle === '3d' && (
-          <div
-            style={{
-              position: 'absolute',
-              width: placement.h,
-              height: placement.l,
-              left: '100%',
-              top: 0,
-              backgroundColor: color.bg,
-              border: `1px solid ${color.border}`,
-              transform: 'rotateY(90deg)',
-              transformOrigin: 'left',
-              opacity: 0.7,
-            }}
-          />
-        )}
-      </div>
+      <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
+        {/* Truck container (rear opening) */}
+        <rect x={pad} y={pad} width={sW} height={sH}
+          fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
+        {/* Floor line */}
+        <line x1={pad} y1={pad + sH} x2={pad + sW} y2={pad + sH} stroke="#94A3B8" strokeWidth="2" />
+        {/* Dimension labels */}
+        <text x={pad + sW / 2} y={pad + sH + 20} textAnchor="middle" className="text-[10px] fill-gray-400">
+          กว้าง {truck.dimensions.width} ม.
+        </text>
+        <text x={pad - 8} y={pad + sH / 2} textAnchor="middle" transform={`rotate(-90, ${pad - 8}, ${pad + sH / 2})`} className="text-[10px] fill-gray-400">
+          สูง {truck.dimensions.height} ม.
+        </text>
+
+        {/* Items - deeper items first, closer items overlay */}
+        {sorted.map((p, idx) => {
+          const color = CARGO_COLORS[p.colorIdx];
+          // Depth-based opacity: items further back are more transparent
+          const depthRatio = p.y / sL;
+          const opacity = 0.4 + 0.6 * (1 - depthRatio); // closer = more opaque
+          const x = pad + p.x;
+          const y = pad + (sH - p.z - p.h); // SVG y is top-down, z is bottom-up
+          return (
+            <g key={idx}>
+              <rect x={x} y={y} width={p.w} height={p.h}
+                fill={color.fill} fillOpacity={opacity}
+                stroke={color.stroke} strokeWidth="1.5" rx="2" />
+              {/* Depth shading: items further back slightly darker */}
+              {depthRatio > 0.3 && (
+                <rect x={x} y={y} width={p.w} height={p.h}
+                  fill="black" fillOpacity={depthRatio * 0.15} rx="2" />
+              )}
+              {showLabels && p.w > 28 && p.h > 14 && (
+                <text x={x + p.w / 2} y={y + p.h / 2 + 3} textAnchor="middle"
+                  className="text-[7px] font-bold fill-white" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Remaining space indicator */}
+        <rect x={pad} y={pad} width={sW} height={sH}
+          fill="transparent" stroke="#10B981" strokeWidth="1" strokeDasharray="4,4" rx="4" />
+      </svg>
     );
   };
 
-  // Truck container outline
-  const containerStyle = getContainerStyle();
+  // --- Top View (looking down from above) ---
+  // Shows: width (left-right) x length (front-back)
+  const renderTopView = () => {
+    const svgW = sW + pad * 2;
+    const svgH = sL + pad * 2;
 
-  // Legend: unique cargo items
+    return (
+      <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
+        {/* Truck container */}
+        <rect x={pad} y={pad} width={sW} height={sL}
+          fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
+        {/* Front/rear labels */}
+        <text x={pad + sW / 2} y={pad + sL + 18} textAnchor="middle" className="text-[10px] fill-gray-400">
+          ← ท้ายรถ (ยาว {truck.dimensions.length} ม.) หน้ารถ →
+        </text>
+
+        {placements.map((p, idx) => {
+          const color = CARGO_COLORS[p.colorIdx];
+          // Height-based opacity: taller items more opaque
+          const heightRatio = p.h / sH;
+          const opacity = 0.5 + 0.5 * heightRatio;
+          return (
+            <g key={idx}>
+              <rect x={pad + p.x} y={pad + p.y} width={p.w} height={p.l}
+                fill={color.fill} fillOpacity={opacity}
+                stroke={color.stroke} strokeWidth="1.5" rx="2" />
+              {showLabels && p.w > 28 && p.l > 12 && (
+                <text x={pad + p.x + p.w / 2} y={pad + p.y + p.l / 2 + 3} textAnchor="middle"
+                  className="text-[7px] font-bold fill-white" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // --- Side View (looking from the side) ---
+  // Shows: length (left-right) x height (bottom-top)
+  const renderSideView = () => {
+    const svgW = sL + pad * 2;
+    const svgH = sH + pad * 2;
+
+    return (
+      <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
+        {/* Truck container */}
+        <rect x={pad} y={pad} width={sL} height={sH}
+          fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
+        <text x={pad + sL / 2} y={pad + sH + 20} textAnchor="middle" className="text-[10px] fill-gray-400">
+          ← ท้ายรถ (ยาว {truck.dimensions.length} ม.) หน้ารถ →
+        </text>
+
+        {placements.map((p, idx) => {
+          const color = CARGO_COLORS[p.colorIdx];
+          const x = pad + p.y;
+          const y = pad + (sH - p.z - p.h);
+          return (
+            <g key={idx}>
+              <rect x={x} y={y} width={p.l} height={p.h}
+                fill={color.fill} fillOpacity={0.75}
+                stroke={color.stroke} strokeWidth="1.5" rx="2" />
+              {showLabels && p.l > 28 && p.h > 14 && (
+                <text x={x + p.l / 2} y={y + p.h / 2 + 3} textAnchor="middle"
+                  className="text-[7px] font-bold fill-white" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // --- 3D Isometric View ---
+  const render3DView = () => {
+    // Isometric projection angles
+    const angle = Math.PI / 6; // 30 degrees
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+
+    // Project 3D point to 2D isometric
+    const project = (x: number, y: number, z: number): [number, number] => {
+      const px = (x - y) * cosA;
+      const py = (x + y) * sinA - z;
+      return [px, py];
+    };
+
+    // Calculate bounding box
+    const corners = [
+      project(0, 0, 0), project(sW, 0, 0), project(0, sL, 0), project(sW, sL, 0),
+      project(0, 0, sH), project(sW, 0, sH), project(0, sL, sH), project(sW, sL, sH),
+    ];
+    const minX = Math.min(...corners.map(c => c[0]));
+    const maxX = Math.max(...corners.map(c => c[0]));
+    const minY = Math.min(...corners.map(c => c[1]));
+    const maxY = Math.max(...corners.map(c => c[1]));
+
+    const svgW = maxX - minX + pad * 2;
+    const svgH = maxY - minY + pad * 2;
+    const offsetX = -minX + pad;
+    const offsetY = -minY + pad;
+
+    // Draw truck wireframe
+    const truckLines = [
+      // Bottom face
+      [project(0, 0, 0), project(sW, 0, 0)],
+      [project(sW, 0, 0), project(sW, sL, 0)],
+      [project(sW, sL, 0), project(0, sL, 0)],
+      [project(0, sL, 0), project(0, 0, 0)],
+      // Top face
+      [project(0, 0, sH), project(sW, 0, sH)],
+      [project(sW, 0, sH), project(sW, sL, sH)],
+      [project(sW, sL, sH), project(0, sL, sH)],
+      [project(0, sL, sH), project(0, 0, sH)],
+      // Vertical edges
+      [project(0, 0, 0), project(0, 0, sH)],
+      [project(sW, 0, 0), project(sW, 0, sH)],
+      [project(sW, sL, 0), project(sW, sL, sH)],
+      [project(0, sL, 0), project(0, sL, sH)],
+    ];
+
+    // Sort items by depth for proper occlusion
+    const sorted = [...placements].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+
+    return (
+      <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
+        {/* Truck wireframe */}
+        {truckLines.map(([from, to], idx) => (
+          <line key={idx}
+            x1={from[0] + offsetX} y1={from[1] + offsetY}
+            x2={to[0] + offsetX} y2={to[1] + offsetY}
+            stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="6,3" />
+        ))}
+
+        {/* Items as 3D boxes */}
+        {sorted.map((p, idx) => {
+          const color = CARGO_COLORS[p.colorIdx];
+          const x = p.x, y = p.y, z = p.z, w = p.w, l = p.l, h = p.h;
+
+          // Top face polygon
+          const topFace = [
+            project(x, y, z + h),
+            project(x + w, y, z + h),
+            project(x + w, y + l, z + h),
+            project(x, y + l, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+
+          // Front face polygon (facing viewer)
+          const frontFace = [
+            project(x, y, z),
+            project(x + w, y, z),
+            project(x + w, y, z + h),
+            project(x, y, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+
+          // Right face polygon
+          const rightFace = [
+            project(x + w, y, z),
+            project(x + w, y + l, z),
+            project(x + w, y + l, z + h),
+            project(x + w, y, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+
+          // Label position (center of top face)
+          const labelPos = project(x + w / 2, y + l / 2, z + h);
+
+          return (
+            <g key={idx}>
+              {/* Front face */}
+              <polygon points={frontFace}
+                fill={color.fill} fillOpacity={0.8}
+                stroke={color.stroke} strokeWidth="1" />
+              {/* Right face (darker) */}
+              <polygon points={rightFace}
+                fill={color.stroke} fillOpacity={0.5}
+                stroke={color.stroke} strokeWidth="1" />
+              {/* Top face (lighter) */}
+              <polygon points={topFace}
+                fill={color.light} fillOpacity={0.7}
+                stroke={color.stroke} strokeWidth="1" />
+              {/* Label */}
+              {showLabels && w > 15 && l > 15 && (
+                <text x={labelPos[0] + offsetX} y={labelPos[1] + offsetY - 2}
+                  textAnchor="middle" className="text-[7px] font-bold fill-gray-800">
+                  {p.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Dimension labels */}
+        <text x={project(sW / 2, 0, -10)[0] + offsetX} y={project(sW / 2, 0, -10)[1] + offsetY}
+          textAnchor="middle" className="text-[9px] fill-gray-400">
+          กว้าง {truck.dimensions.width} ม.
+        </text>
+      </svg>
+    );
+  };
+
+  // Legend data
   const uniqueCargos = Array.from(cargoColorMap.entries()).map(([cargoIndex, colorIdx]) => {
     const cargoItem = cargoItems[cargoIndex];
     const count = result.items.filter(i => i.cargoIndex === cargoIndex).length;
     return {
-      cargoIndex,
-      colorIdx,
+      cargoIndex, colorIdx,
       label: cargoItem ? `รายการ ${cargoIndex + 1}` : `ชิ้น ${cargoIndex}`,
       dimensions: cargoItem ? `${cargoItem.width}×${cargoItem.length}×${cargoItem.height} ซม.` : '',
       quantity: cargoItem?.quantity ?? 1,
@@ -226,17 +369,23 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
       {/* View Controls */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
-          {(['3d', 'top', 'front', 'side'] as const).map(view => (
+          {([
+            { key: 'rear' as ViewMode, label: '🚪 ด้านท้ายรถ', desc: 'มองจากท้ายรถเข้าไป' },
+            { key: 'top' as ViewMode, label: '⬆️ มุมบน', desc: 'มองจากด้านบนลงมา' },
+            { key: 'side' as ViewMode, label: '👁️ ด้านข้าง', desc: 'มองจากด้านข้าง' },
+            { key: '3d' as ViewMode, label: '🎲 3D', desc: 'มุมมอง 3 มิติ' },
+          ]).map(view => (
             <button
-              key={view}
-              onClick={() => setViewAngle(view)}
+              key={view.key}
+              onClick={() => setViewAngle(view.key)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                viewAngle === view
+                viewAngle === view.key
                   ? 'bg-slate-800 text-white shadow'
                   : 'text-gray-600 hover:bg-gray-200'
               }`}
+              title={view.desc}
             >
-              {view === '3d' ? '🎲 3D' : view === 'top' ? '⬆️ มุมบน' : view === 'front' ? '👁️ ด้านหน้า' : '👈 ด้านข้าง'}
+              {view.label}
             </button>
           ))}
         </div>
@@ -250,30 +399,41 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         </button>
       </div>
 
-      {/* 3D Visualization */}
-      <div className="bg-gradient-to-b from-slate-100 to-slate-200 rounded-xl p-6 flex justify-center overflow-hidden">
-        <div className="relative" style={containerStyle}>
-          {/* Truck container border */}
-          <div
-            className="absolute border-2 border-dashed border-slate-400 rounded-sm"
-            style={{
-              width: viewAngle === 'side' ? scaledTruckL : scaledTruckW,
-              height: viewAngle === 'front' || viewAngle === 'side' ? scaledTruckH : scaledTruckL,
-              ...(viewAngle === '3d' ? {
-                width: scaledTruckW,
-                height: scaledTruckL,
-              } : {}),
-            }}
-          />
+      {/* Visualization Area */}
+      <div className="bg-gradient-to-b from-slate-100 to-slate-200 rounded-xl p-4 flex justify-center overflow-hidden">
+        {viewAngle === 'rear' && renderRearView()}
+        {viewAngle === 'top' && renderTopView()}
+        {viewAngle === 'side' && renderSideView()}
+        {viewAngle === '3d' && render3DView()}
+      </div>
 
-          {/* Placed items */}
-          {placements.map((placement, idx) => renderItem(placement, idx))}
+      {/* Space Usage Info */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-200">
+          <p className="text-[10px] text-gray-500">ใช้แล้ว</p>
+          <p className="text-sm font-bold text-emerald-600">{usedPercent.toFixed(1)}%</p>
+        </div>
+        <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-200">
+          <p className="text-[10px] text-gray-500">พื้นที่ว่าง</p>
+          <p className="text-sm font-bold text-blue-600">{freePercent.toFixed(1)}%</p>
+        </div>
+        <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-200">
+          <p className="text-[10px] text-gray-500">วางได้</p>
+          <p className="text-sm font-bold text-emerald-600">{result.items.length} ชิ้น</p>
+        </div>
+        <div className="bg-red-50 rounded-lg p-2 text-center border border-red-200">
+          <p className="text-[10px] text-gray-500">วางไม่ได้</p>
+          <p className="text-sm font-bold text-red-600">{result.unfittedItems.length} ชิ้น</p>
         </div>
       </div>
 
-      {/* Truck Dimensions Label */}
+      {/* View Description */}
       <div className="text-center text-xs text-gray-500">
-        🚛 {truck.name} — ขนาด: {truck.dimensions.width}×{truck.dimensions.length}×{truck.dimensions.height} ม. (กว้าง×ยาว×สูง)
+        {viewAngle === 'rear' && '🚪 มุมมองจากด้านท้ายรถ — เหมือนเปิดประตูท้ายแล้วมองเข้าไป สินค้าที่อยู่ใกล้จะชัดกว่า'}
+        {viewAngle === 'top' && '⬆️ มุมมองจากด้านบน — เห็นการกระจายตัวตามความยาวรถ'}
+        {viewAngle === 'side' && '👁️ มุมมองจากด้านข้าง — เห็นความสูงของสินค้าในแต่ละตำแหน่ง'}
+        {viewAngle === '3d' && '🎲 มุมมอง 3 มิติ — เห็นรูปร่างกล่องสินค้าทั้งหมด'}
+        {' | '}🚛 {truck.name} — {truck.dimensions.width}×{truck.dimensions.length}×{truck.dimensions.height} ม. (กว้าง×ยาว×สูง)
       </div>
 
       {/* Legend */}
@@ -284,7 +444,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             <div key={cargo.cargoIndex} className="flex items-center gap-2 bg-white rounded-lg p-2 border">
               <div
                 className="w-5 h-5 rounded flex-shrink-0"
-                style={{ backgroundColor: cargo.color.bg, border: `2px solid ${cargo.color.border}` }}
+                style={{ backgroundColor: cargo.color.fill, border: `2px solid ${cargo.color.stroke}` }}
               />
               <div className="text-xs">
                 <div className="font-medium text-gray-800">{cargo.label}</div>
@@ -323,6 +483,9 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           </ol>
           <p>
             <strong>พื้นที่ใช้ได้จริง:</strong> คูณด้วย usableSpace {truck.usableSpace}% (คิดจากทุกมิติ)
+          </p>
+          <p>
+            <strong>มุมมองด้านท้ายรถ:</strong> แสดงภาพเหมือนเปิดประตูท้ายรถแล้วมองเข้าไป — สินค้าที่อยู่ใกล้ประตู (ด้านท้าย) จะชัดเจนกว่า สินค้าที่อยู่ลึกเข้าไปด้านในจะจางลงเพื่อแสดงความลึก
           </p>
           <p className="text-blue-500 italic">
             ⚠️ ผลลัพธ์เป็นการประมาณการ สินค้าจริงอาจวางได้ต่างเล็กน้อยขึ้นอยู่กับรูปทรงและการจัดเรียงจริง

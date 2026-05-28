@@ -77,12 +77,36 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     );
 
     if (diesel) {
-      // Use today's date in ISO format
-      const today = new Date();
-      const day = today.getDate().toString().padStart(2, '0');
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const year = today.getFullYear().toString();
-      const isoDate = `${year}-${month}-${day}`;
+      // Extract date from remark for accurate date
+      const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
+      let isoDate: string;
+
+      if (remarkMatch) {
+        const day = remarkMatch[1].padStart(2, '0');
+        const thaiMonth = remarkMatch[2];
+
+        const months: Record<string, string> = {
+          'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
+          'พ.ค.': '05', 'มิ.ย.': '06', 'ก.ค.': '07', 'ส.ค.': '08',
+          'ก.ย.': '09', 'ต.ค.': '10', 'พ.ย.': '11', 'ธ.ค.': '12'
+        };
+
+        const month = months[thaiMonth] || '01';
+        let buddhistYear = remarkMatch[3];
+        // Handle 2-digit Buddhist year (e.g. "69" means 2569)
+        if (buddhistYear.length <= 2) {
+          buddhistYear = '25' + buddhistYear.padStart(2, '0');
+        }
+        const christianYear = parseInt(buddhistYear) - 543;
+        isoDate = `${christianYear}-${month}-${day}`;
+      } else {
+        // Fallback: use today's date in ISO format
+        const today = new Date();
+        const day = today.getDate().toString().padStart(2, '0');
+        const month = (today.getMonth() + 1).toString().padStart(2, '0');
+        const year = today.getFullYear().toString();
+        isoDate = `${year}-${month}-${day}`;
+      }
 
       return { date: isoDate, price: diesel.PriceToday };
     }
