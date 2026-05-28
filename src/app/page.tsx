@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { truckTypes, FALLBACK_OIL_PRICE, getTruckByJobKey } from '@/lib/truck-data';
 import { performBinPacking } from '@/lib/bin-packing';
-import { formatThaiDate, getTodayISO } from '@/lib/date-utils';
+import { formatThaiDate, formatDisplayDate, getTodayISO } from '@/lib/date-utils';
+import BinPackingVisualization from '@/components/BinPackingVisualization';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 
 export default function Home() {
@@ -17,11 +18,11 @@ export default function Home() {
   const [loadingOil, setLoadingOil] = useState(true);
   const [liveOilPrice, setLiveOilPrice] = useState<number | null>(null);
 
-  // ===== Manual Oil Price Input =====
+  // ===== Manual Oil Price Input (session-only) =====
   const [showOilPriceForm, setShowOilPriceForm] = useState(false);
   const [manualPrice, setManualPrice] = useState<string>('');
-  const [manualDate, setManualDate] = useState<string>(getTodayISO());
-  const [savingOilPrice, setSavingOilPrice] = useState(false);
+  const [usingManualPrice, setUsingManualPrice] = useState(false);
+  const [originalOilPrice, setOriginalOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
 
   // ===== Price Calculator State =====
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
@@ -234,36 +235,30 @@ export default function Home() {
 
   const openPopup = (image: string) => { setPopupImage(image); setShowPopup(true); };
 
-  const handleSaveOilPrice = async () => {
+  const handleApplyManualPrice = () => {
     const price = parseFloat(manualPrice);
     if (isNaN(price) || price <= 0 || price > 200) {
       alert('กรุณาใส่ราคาที่ถูกต้อง (0.01 - 200 บาท)');
       return;
     }
-    setSavingOilPrice(true);
-    try {
-      const res = await fetch('/api/oil-price', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ price, date: manualDate, manual: true }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setShowOilPriceForm(false);
-        setManualPrice('');
-        await fetchOilPrice();
-      } else {
-        alert(data.error || 'ไม่สามารถบันทึกได้');
-      }
-    } catch {
-      alert('เกิดข้อผิดพลาดในการบันทึก');
-    } finally {
-      setSavingOilPrice(false);
+    if (!usingManualPrice) {
+      setOriginalOilPrice(currentOilPrice);
     }
+    setCurrentOilPrice(price);
+    setUsingManualPrice(true);
+    setShowOilPriceForm(false);
+    setManualPrice('');
+  };
+
+  const handleClearManualPrice = () => {
+    setCurrentOilPrice(originalOilPrice);
+    setUsingManualPrice(false);
+    setManualPrice('');
+    setShowOilPriceForm(false);
   };
 
   const deleteOilPrice = async (date: string) => {
-    if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatThaiDate(date)} ใช่หรือไม่?`)) return;
+    if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatDisplayDate(date)} ใช่หรือไม่?`)) return;
     try {
       const res = await fetch(`/api/oil-price?date=${encodeURIComponent(date)}`, { method: 'DELETE' });
       if (res.ok) await fetchOilPrice();
@@ -454,6 +449,13 @@ export default function Home() {
                         </div>
                       </div>
 
+                      {/* 3D Visualization */}
+                      <BinPackingVisualization
+                        result={binPackingResult}
+                        truck={selectedTruck}
+                        cargoItems={cargoItems}
+                      />
+
                       {/* Success/Error */}
                       {binPackingResult.canFitAll && totalWeight <= selectedTruck.maxWeight && (
                         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center">
@@ -510,7 +512,8 @@ export default function Home() {
             <section className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">⛽ ราคาน้ำมันดีเซล</h2>
-                <p className="text-emerald-100 text-sm">อ้างอิง: บางจาก คอร์ปอเรชัน</p>
+                <p className="text-emerald-100 text-sm">อ้างอิง: บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)</p>
+                <p className="text-emerald-100 text-xs mt-0.5">ราคาขายปลีก กทม. และปริมณฑล (หน่วยแสดงเป็น บาท/ลิตร)</p>
               </div>
               <div className="p-4">
                 {loadingOil ? (
@@ -532,20 +535,21 @@ export default function Home() {
                       </thead>
                       <tbody>
                         {oilPriceHistory.slice(0, 10).map((item, index) => {
+                          let statusEmoji = '';
                           let statusText = '';
                           let statusColor = '';
                           if (index < oilPriceHistory.length - 1) {
                             const prevPrice = oilPriceHistory[index + 1].price;
                             const diff = item.price - prevPrice;
-                            if (diff > 0) { statusText = `▲ +${diff.toFixed(2)}`; statusColor = 'text-red-500'; }
-                            else if (diff < 0) { statusText = `▼ ${diff.toFixed(2)}`; statusColor = 'text-emerald-500'; }
-                            else { statusText = '— ไม่เปลี่ยน'; statusColor = 'text-gray-400'; }
+                            if (diff > 0) { statusEmoji = '🟢'; statusText = `▲ เพิ่มขึ้น +${diff.toFixed(2)}`; statusColor = 'text-emerald-600'; }
+                            else if (diff < 0) { statusEmoji = '🔴'; statusText = `▼ ลดลง ${diff.toFixed(2)}`; statusColor = 'text-red-500'; }
+                            else { statusEmoji = '⚪'; statusText = '➖ เท่าเดิม'; statusColor = 'text-gray-500'; }
                           }
                           const isCurrent = index === 0;
                           return (
                             <tr key={item.date} className={`border-b ${isCurrent ? 'bg-emerald-50 font-bold' : ''}`}>
-                              <td className="py-2 px-3 text-left text-gray-700">{formatThaiDate(item.date)}</td>
-                              <td className={`py-2 px-3 text-center text-sm font-medium ${statusColor}`}>{statusText}</td>
+                              <td className="py-2 px-3 text-left text-gray-700">{formatDisplayDate(item.date)}</td>
+                              <td className={`py-2 px-3 text-center text-sm font-medium ${statusColor}`}>{statusEmoji} {statusText}</td>
                               <td className="py-2 px-3 text-center">{isCurrent && <span className="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded">ใช้คำนวณ</span>}</td>
                               <td className={`py-2 px-3 text-right ${isCurrent ? 'text-emerald-600 text-lg' : 'text-gray-900'}`}>{item.price.toFixed(2)}</td>
                               <td className="py-2 px-3 text-center">{item.manual && <button onClick={() => deleteOilPrice(item.date)} className="text-red-400 hover:text-red-600 text-xs" title="ลบ">🗑️</button>}</td>
@@ -564,35 +568,41 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Manual Oil Price Input */}
+                {/* Manual Oil Price Input (session-only) */}
                 <div className="mt-4 border-t pt-4">
+                  {usingManualPrice && (
+                    <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                      <div className="text-sm text-blue-800">
+                        <span className="font-medium">✏️ ใช้ราคาน้ำมันที่กำหนดเอง:</span> {currentOilPrice.toFixed(2)} บาท/ลิตร
+                        <span className="text-blue-500 text-xs ml-1">(ใช้คำนวณเฉพาะรอบนี้เท่านั้น)</span>
+                      </div>
+                      <button onClick={handleClearManualPrice} className="text-red-500 hover:text-red-700 text-xs font-medium px-2 py-1 border border-red-200 rounded hover:bg-red-50">
+                        ✕ กลับใช้ราคาจากระบบ
+                      </button>
+                    </div>
+                  )}
                   {!showOilPriceForm ? (
                     <div className="flex flex-wrap gap-2">
-                      <button onClick={() => { setShowOilPriceForm(true); setManualDate(getTodayISO()); setManualPrice(''); }} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600 transition">
-                        ✏️ ใส่ราคาน้ำมันเอง
+                      <button onClick={() => { setShowOilPriceForm(true); setManualPrice(''); }} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600 transition">
+                        ✏️ ใส่ราคาน้ำมันดีเซล
                       </button>
                       {liveOilPrice !== null && liveOilPrice !== currentOilPrice && (
                         <button onClick={() => setCurrentOilPrice(liveOilPrice)} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition">
-                          🔄 ใช้ราคาล่าสุดจากบางจาก ({liveOilPrice.toFixed(2)} บาท)
+                          🔄 ใช้ราคาล่าสุดจากปตท. ({liveOilPrice.toFixed(2)} บาท)
                         </button>
                       )}
                     </div>
                   ) : (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
                       <h3 className="font-bold text-amber-800">✏️ ใส่ราคาน้ำมันดีเซล</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-gray-600 font-medium">วันที่</label>
-                          <input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600 font-medium">ราคา (บาท/ลิตร)</label>
-                          <input type="number" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="เช่น 32.50" min="0.01" max="200" step="0.01" />
-                        </div>
+                      <p className="text-xs text-amber-600">⚠️ ราคานี้จะใช้คำนวณเฉพาะรอบนี้เท่านั้น จะไม่ถูกบันทึกลงระบบ</p>
+                      <div>
+                        <label className="text-xs text-gray-600 font-medium">ราคา (บาท/ลิตร)</label>
+                        <input type="number" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="เช่น 32.50" min="0.01" max="200" step="0.01" />
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={handleSaveOilPrice} disabled={savingOilPrice || !manualPrice} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50 transition">
-                          {savingOilPrice ? 'กำลังบันทึก...' : '💾 บันทึก'}
+                        <button onClick={handleApplyManualPrice} disabled={!manualPrice} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50 transition">
+                          ✅ ใช้คำนวณ
                         </button>
                         <button onClick={() => setShowOilPriceForm(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-300 transition">ยกเลิก</button>
                       </div>

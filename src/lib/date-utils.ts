@@ -2,7 +2,8 @@
  * Date Utilities - Standardized date handling
  *
  * Storage format: ISO YYYY-MM-DD
- * Display format: Thai Buddhist calendar DD/MM/BBBB (e.g. 28/05/2569)
+ * Display format: DD/MM/YYYY (Christian era, e.g. 28/05/2026)
+ * Thai format: DD/MM/BBBB (Buddhist era, e.g. 28/05/2569)
  */
 
 const THAI_MONTHS: Record<string, string> = {
@@ -72,6 +73,30 @@ export function getTodayThai(): string {
   const month = (today.getMonth() + 1).toString().padStart(2, '0');
   const year = (today.getFullYear() + 543).toString();
   return `${day}/${month}/${year}`;
+}
+
+// Format ISO date to standard DD/MM/YYYY (Christian era)
+export function formatDisplayDate(isoDate: string): string {
+  if (!isoDate) return '';
+
+  // Already in DD/MM/YYYY format
+  if (isoDate.includes('/') && isoDate.split('/').length === 3) {
+    // If Buddhist era, convert to Christian
+    const parts = isoDate.split('/');
+    if (parseInt(parts[2]) > 2400) {
+      return `${parts[0]}/${parts[1]}/${parseInt(parts[2]) - 543}`;
+    }
+    return isoDate;
+  }
+
+  // ISO format: YYYY-MM-DD
+  const parts = isoDate.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`;
+  }
+
+  return isoDate;
 }
 
 // Get Thai month name
