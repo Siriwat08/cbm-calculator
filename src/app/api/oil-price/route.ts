@@ -3,6 +3,26 @@ import { NextRequest, NextResponse } from 'next/server';
 const FALLBACK_PRICE = 50.54;
 const HISTORY_KEY = 'oil-price-history';
 
+// ===== API Key Auth =====
+function validateApiKey(request: NextRequest): boolean {
+  const apiKey = request.headers.get('x-api-key') ||
+    request.headers.get('authorization')?.replace('Bearer ', '') ||
+    new URL(request.url).searchParams.get('apiKey');
+
+  // Allow if ADMIN_API_KEY env var is not set (development mode)
+  const adminKey = process.env.ADMIN_API_KEY;
+  if (!adminKey) return true;
+
+  return apiKey === adminKey;
+}
+
+function unauthorizedResponse() {
+  return NextResponse.json(
+    { error: 'ไม่มีสิทธิ์เข้าถึง — กรุณาระบุ API Key' },
+    { status: 401 }
+  );
+}
+
 // Edge Config helpers
 function getEdgeConfigId(): string | undefined {
   return process.env.EDGE_CONFIG_ID;
@@ -199,6 +219,11 @@ export async function GET() {
 
 // ===== POST: Add/Update oil price (manual entry) =====
 export async function POST(request: NextRequest) {
+  // Auth check
+  if (!validateApiKey(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const body = await request.json();
     const { price, date, manual = true } = body;
@@ -288,6 +313,11 @@ export async function POST(request: NextRequest) {
 
 // ===== DELETE: Remove oil price entry =====
 export async function DELETE(request: NextRequest) {
+  // Auth check
+  if (!validateApiKey(request)) {
+    return unauthorizedResponse();
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const dateToDelete = searchParams.get('date');

@@ -1,6 +1,19 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const HISTORY_KEY = 'oil-price-history';
+
+// ===== API Key Auth =====
+function validateApiKey(request: NextRequest): boolean {
+  const apiKey = request.headers.get('x-api-key') ||
+    request.headers.get('authorization')?.replace('Bearer ', '') ||
+    new URL(request.url).searchParams.get('apiKey');
+
+  // Allow if ADMIN_API_KEY env var is not set (development mode)
+  const adminKey = process.env.ADMIN_API_KEY;
+  if (!adminKey) return true;
+
+  return apiKey === adminKey;
+}
 
 // ===== Edge Config Read =====
 async function getFromEdgeConfig<T>(key: string): Promise<T | null> {
@@ -119,16 +132,38 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
 }
 
 // ===== CRON HANDLER =====
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Auth check for manual cron triggers (Vercel cron sends vercel cron header)
+  const isVercelCron = request.headers.get('vercel-cron') === 'true';
+  if (!isVercelCron && !validateApiKey(request)) {
+    return NextResponse.json(
+      { error: 'ไม่มีสิทธิ์เข้าถึง — กรุณาระบุ API Key' },
+      { status: 401 }
+    );
+  }
+
   console.log('Cron job started at:', new Date().toISOString());
 
   try {
     const currentPrice = await fetchOilPrice();
 
     if (!currentPrice) {
+      // If Bangchak API fails, try to use latest history price
+      const history = await getFromEdgeConfig<{ date: string; price: number }[]>(HISTORY_KEY) || [];
+      if (history.length > 0) {
+        console.log('Bangchak API failed, keeping latest history price');
+        return NextResponse.json({
+          success: true,
+          message: 'Bangchak API unavailable, kept latest stored price',
+          date: history[0].date,
+          price: history[0].price,
+          history: history,
+        });
+      }
+
       return NextResponse.json({
         success: false,
-        error: 'Failed to fetch oil price'
+        error: 'Failed to fetch oil price and no history available'
       }, { status: 500 });
     }
 
