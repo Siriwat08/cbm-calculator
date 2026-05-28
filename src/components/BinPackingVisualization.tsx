@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { BinPackingResult, TruckType, CargoItem } from '@/lib/types';
 
 interface BinPackingVisualizationProps {
@@ -41,30 +41,43 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
   const sH = truckH * scale;
 
   // Group items by cargo index for coloring
-  const cargoColorMap = new Map<number, number>();
-  let colorIdx = 0;
-  result.items.forEach(item => {
-    if (!cargoColorMap.has(item.cargoIndex)) {
-      cargoColorMap.set(item.cargoIndex, colorIdx % CARGO_COLORS.length);
-      colorIdx++;
-    }
-  });
+  const cargoColorMap = useMemo(() => {
+    const map = new Map<number, number>();
+    let colorIdx = 0;
+    result.items.forEach(item => {
+      if (!map.has(item.cargoIndex)) {
+        map.set(item.cargoIndex, colorIdx % CARGO_COLORS.length);
+        colorIdx++;
+      }
+    });
+    return map;
+  }, [result.items]);
 
-  // Build placement data
+  // Build placement data — KEY CHANGE: flip Y axis so y=0 is the BACK (door)
+  // In the algorithm, y=0 is the front. We flip so y=0 becomes the rear door.
+  // This means: visualY = sL - algorithmY - itemLength
+  // This simulates loading from the back: first items go deep (visual far from door),
+  // last items are near the door (visual close to door = y≈0)
   interface PlacementInfo {
-    x: number; y: number; z: number;
-    w: number; l: number; h: number;
+    x: number; y: number; z: number;          // visual position (y=0 is back/door)
+    w: number; l: number; h: number;           // visual dimensions
     cargoIndex: number; colorIdx: number;
     label: string;
     origW: number; origL: number; origH: number;
+    depthFromDoor: number; // cm from rear door
   }
 
   const placements: PlacementInfo[] = result.items.map(item => {
     const cIdx = cargoColorMap.get(item.cargoIndex) ?? 0;
     const cargoItem = cargoItems[item.cargoIndex];
+    // Flip Y: visual y = (truckL - algorithmY - itemLength) * scale
+    const algY = item.position.y;
+    const itemL = item.rotatedDimensions.length;
+    const visualY = (truckL - algY - itemL) * scale;
+    const depthFromDoor = truckL - algY - itemL; // cm from door
     return {
       x: item.position.x * scale,
-      y: item.position.y * scale,
+      y: visualY,
       z: item.position.z * scale,
       w: item.rotatedDimensions.width * scale,
       l: item.rotatedDimensions.length * scale,
@@ -75,6 +88,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
       origW: item.rotatedDimensions.width,
       origL: item.rotatedDimensions.length,
       origH: item.rotatedDimensions.height,
+      depthFromDoor,
     };
   });
 
@@ -84,18 +98,24 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
   const usedPercent = truckVolume > 0 ? (totalItemsVolume / truckVolume * 100) : 0;
   const freePercent = 100 - usedPercent;
 
+  // Calculate the depth of the deepest item from the door (how far items go into the truck)
+  const deepestItemEnd = placements.reduce((max, p) => Math.max(max, p.y + p.l), 0);
+  const remainingSpaceFromDoor = sL - deepestItemEnd; // This is now the space at the FRONT (cab side)
+  const spaceNearDoor = placements.length === 0 ? sL : Math.min(...placements.map(p => p.y));
+
   // ============ SVG RENDERING ============
   // Common padding
   const pad = 30;
 
   // --- Rear View (looking from the back into the truck) ---
   // Shows: width (left-right) x height (bottom-top)
-  // Items are drawn back-to-front (deeper items first, closer items on top)
+  // Items near the door (y ≈ 0) are more opaque (closer to viewer)
+  // Items deep inside (y >> 0) are more transparent (further from viewer)
   const renderRearView = () => {
     const svgW = sW + pad * 2;
     const svgH = sH + pad * 2;
-    // Sort by depth (y) - items further back drawn first
-    const sorted = [...placements].sort((a, b) => a.y - b.y);
+    // Sort by depth from door - items further from door (deeper) drawn first
+    const sorted = [...placements].sort((a, b) => b.y - a.y);
 
     return (
       <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
@@ -104,6 +124,10 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
         {/* Floor line */}
         <line x1={pad} y1={pad + sH} x2={pad + sW} y2={pad + sH} stroke="#94A3B8" strokeWidth="2" />
+        {/* Door frame indicator */}
+        <text x={pad + sW / 2} y={pad - 6} textAnchor="middle" className="text-[9px] fill-slate-500 font-bold">
+          🚪 ประตูท้ายรถ (มองจากนอกเข้าไป)
+        </text>
         {/* Dimension labels */}
         <text x={pad + sW / 2} y={pad + sH + 20} textAnchor="middle" className="text-[10px] fill-gray-400">
           กว้าง {truck.dimensions.width} ม.
@@ -112,12 +136,12 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           สูง {truck.dimensions.height} ม.
         </text>
 
-        {/* Items - deeper items first, closer items overlay */}
+        {/* Items - deeper items first, closer items overlay on top */}
         {sorted.map((p, idx) => {
           const color = CARGO_COLORS[p.colorIdx];
-          // Depth-based opacity: items further back are more transparent
+          // Depth-based opacity: items near the door (y ≈ 0) are more opaque
           const depthRatio = p.y / sL;
-          const opacity = 0.4 + 0.6 * (1 - depthRatio); // closer = more opaque
+          const opacity = 0.4 + 0.6 * (1 - depthRatio); // closer to door = more opaque
           const x = pad + p.x;
           const y = pad + (sH - p.z - p.h); // SVG y is top-down, z is bottom-up
           return (
@@ -125,7 +149,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
               <rect x={x} y={y} width={p.w} height={p.h}
                 fill={color.fill} fillOpacity={opacity}
                 stroke={color.stroke} strokeWidth="1.5" rx="2" />
-              {/* Depth shading: items further back slightly darker */}
+              {/* Depth shading: items deep inside slightly darker */}
               {depthRatio > 0.3 && (
                 <rect x={x} y={y} width={p.w} height={p.h}
                   fill="black" fillOpacity={depthRatio * 0.15} rx="2" />
@@ -140,15 +164,24 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           );
         })}
 
-        {/* Remaining space indicator */}
-        <rect x={pad} y={pad} width={sW} height={sH}
-          fill="transparent" stroke="#10B981" strokeWidth="1" strokeDasharray="4,4" rx="4" />
+        {/* Remaining space indicator - show free area near door */}
+        {placements.length > 0 && spaceNearDoor > 5 && (
+          <g>
+            <rect x={pad} y={pad} width={sW} height={sH}
+              fill="rgba(16, 185, 129, 0.08)" stroke="#10B981" strokeWidth="1" strokeDasharray="4,4" rx="4" />
+            <text x={pad + sW / 2} y={pad + sH / 2} textAnchor="middle"
+              className="text-[9px] fill-emerald-500 font-bold">
+              พื้นที่ว่างด้านท้าย
+            </text>
+          </g>
+        )}
       </svg>
     );
   };
 
   // --- Top View (looking down from above) ---
-  // Shows: width (left-right) x length (front-back)
+  // Shows: width (left-right) x length (top-bottom)
+  // TOP of SVG = rear/door, BOTTOM of SVG = front/cab
   const renderTopView = () => {
     const svgW = sW + pad * 2;
     const svgH = sL + pad * 2;
@@ -158,9 +191,14 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         {/* Truck container */}
         <rect x={pad} y={pad} width={sW} height={sL}
           fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
-        {/* Front/rear labels */}
+
+        {/* Door indicator (top = rear) */}
+        <rect x={pad} y={pad} width={sW} height={3} fill="#3B82F6" rx="1" />
+        <text x={pad + sW / 2} y={pad - 5} textAnchor="middle" className="text-[9px] fill-blue-500 font-bold">
+          🚪 ท้ายรถ
+        </text>
         <text x={pad + sW / 2} y={pad + sL + 18} textAnchor="middle" className="text-[10px] fill-gray-400">
-          ← ท้ายรถ (ยาว {truck.dimensions.length} ม.) หน้ารถ →
+          🚛 หน้ารถ (ยาว {truck.dimensions.length} ม.)
         </text>
 
         {placements.map((p, idx) => {
@@ -182,12 +220,25 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             </g>
           );
         })}
+
+        {/* Remaining space at door area (top) */}
+        {placements.length > 0 && spaceNearDoor > 5 && (
+          <g>
+            <rect x={pad} y={pad} width={sW} height={Math.min(spaceNearDoor, sL * 0.3)}
+              fill="rgba(16, 185, 129, 0.1)" stroke="#10B981" strokeWidth="1" strokeDasharray="3,3" rx="2" />
+            <text x={pad + sW / 2} y={pad + Math.min(spaceNearDoor, sL * 0.3) / 2 + 3} textAnchor="middle"
+              className="text-[8px] fill-emerald-500 font-bold">
+              พื้นที่ว่าง
+            </text>
+          </g>
+        )}
       </svg>
     );
   };
 
   // --- Side View (looking from the side) ---
   // Shows: length (left-right) x height (bottom-top)
+  // LEFT = rear/door, RIGHT = front/cab
   const renderSideView = () => {
     const svgW = sL + pad * 2;
     const svgH = sH + pad * 2;
@@ -197,13 +248,22 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         {/* Truck container */}
         <rect x={pad} y={pad} width={sL} height={sH}
           fill="rgba(241,245,249,0.5)" stroke="#64748B" strokeWidth="3" rx="4" strokeDasharray="8,4" />
+
+        {/* Door indicator (left = rear) */}
+        <line x1={pad} y1={pad} x2={pad} y2={pad + sH} stroke="#3B82F6" strokeWidth="3" />
+        <text x={pad - 5} y={pad + sH / 2} textAnchor="end" transform={`rotate(-90, ${pad - 5}, ${pad + sH / 2})`} className="text-[9px] fill-blue-500 font-bold">
+          🚪 ท้าย
+        </text>
+        <text x={pad + sL + 5} y={pad + sH / 2} textAnchor="start" transform={`rotate(90, ${pad + sL + 5}, ${pad + sH / 2})`} className="text-[9px] fill-gray-400">
+          หน้ารถ
+        </text>
         <text x={pad + sL / 2} y={pad + sH + 20} textAnchor="middle" className="text-[10px] fill-gray-400">
-          ← ท้ายรถ (ยาว {truck.dimensions.length} ม.) หน้ารถ →
+          ยาว {truck.dimensions.length} ม.
         </text>
 
         {placements.map((p, idx) => {
           const color = CARGO_COLORS[p.colorIdx];
-          const x = pad + p.y;
+          const x = pad + p.y; // y=0 is the door (left side)
           const y = pad + (sH - p.z - p.h);
           return (
             <g key={idx}>
@@ -219,11 +279,24 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             </g>
           );
         })}
+
+        {/* Remaining space at door area (left side) */}
+        {placements.length > 0 && spaceNearDoor > 5 && (
+          <g>
+            <rect x={pad} y={pad} width={Math.min(spaceNearDoor, sL * 0.3)} height={sH}
+              fill="rgba(16, 185, 129, 0.1)" stroke="#10B981" strokeWidth="1" strokeDasharray="3,3" rx="2" />
+            <text x={pad + Math.min(spaceNearDoor, sL * 0.3) / 2} y={pad + sH / 2} textAnchor="middle"
+              className="text-[8px] fill-emerald-500 font-bold">
+              ว่าง
+            </text>
+          </g>
+        )}
       </svg>
     );
   };
 
   // --- 3D Isometric View ---
+  // Rear-left corner visible, door on the left side
   const render3DView = () => {
     // Isometric projection angles
     const angle = Math.PI / 6; // 30 degrees
@@ -231,6 +304,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     const sinA = Math.sin(angle);
 
     // Project 3D point to 2D isometric
+    // We rotate so that the rear (y=0) is on the left and front (y=max) is on the right
     const project = (x: number, y: number, z: number): [number, number] => {
       const px = (x - y) * cosA;
       const py = (x + y) * sinA - z;
@@ -274,6 +348,14 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     // Sort items by depth for proper occlusion
     const sorted = [...placements].sort((a, b) => (a.x + a.y) - (b.x + b.y));
 
+    // Door lines (rear face - y=0 plane)
+    const doorLines = [
+      [project(0, 0, 0), project(sW, 0, 0)],
+      [project(sW, 0, 0), project(sW, 0, sH)],
+      [project(sW, 0, sH), project(0, 0, sH)],
+      [project(0, 0, sH), project(0, 0, 0)],
+    ];
+
     return (
       <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
         {/* Truck wireframe */}
@@ -283,6 +365,20 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             x2={to[0] + offsetX} y2={to[1] + offsetY}
             stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="6,3" />
         ))}
+
+        {/* Door face (rear - y=0) - highlighted */}
+        <polygon
+          points={[
+            project(0, 0, 0), project(sW, 0, 0),
+            project(sW, 0, sH), project(0, 0, sH),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ')}
+          fill="rgba(59, 130, 246, 0.08)"
+          stroke="#3B82F6" strokeWidth="2" strokeDasharray="4,4"
+        />
+        <text x={project(sW / 2, 0, sH / 2)[0] + offsetX} y={project(sW / 2, 0, sH / 2)[1] + offsetY}
+          textAnchor="middle" className="text-[8px] fill-blue-500 font-bold">
+          🚪 ประตูท้าย
+        </text>
 
         {/* Items as 3D boxes */}
         {sorted.map((p, idx) => {
@@ -297,8 +393,8 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             project(x, y + l, z + h),
           ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
 
-          // Front face polygon (facing viewer)
-          const frontFace = [
+          // Left face polygon (facing viewer - rear face visible from this angle)
+          const leftFace = [
             project(x, y, z),
             project(x + w, y, z),
             project(x + w, y, z + h),
@@ -318,8 +414,8 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
 
           return (
             <g key={idx}>
-              {/* Front face */}
-              <polygon points={frontFace}
+              {/* Left face */}
+              <polygon points={leftFace}
                 fill={color.fill} fillOpacity={0.8}
                 stroke={color.stroke} strokeWidth="1" />
               {/* Right face (darker) */}
@@ -342,9 +438,13 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         })}
 
         {/* Dimension labels */}
-        <text x={project(sW / 2, 0, -10)[0] + offsetX} y={project(sW / 2, 0, -10)[1] + offsetY}
+        <text x={project(sW / 2, sL, -10)[0] + offsetX} y={project(sW / 2, sL, -10)[1] + offsetY}
           textAnchor="middle" className="text-[9px] fill-gray-400">
           กว้าง {truck.dimensions.width} ม.
+        </text>
+        <text x={project(-5, sL / 2, -10)[0] + offsetX} y={project(-5, sL / 2, -10)[1] + offsetY}
+          textAnchor="middle" className="text-[9px] fill-blue-400">
+          🚪 ท้าย ← → หน้า
         </text>
       </svg>
     );
@@ -427,12 +527,22 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         </div>
       </div>
 
+      {/* Loading Direction Indicator */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+        <p className="text-sm font-medium text-blue-800">
+          🚛 การบรรทุก: ใส่ของจาก <span className="text-blue-600 font-bold">ด้านท้ายรถ (ประตู)</span> เข้าไปข้างใน
+        </p>
+        <p className="text-xs text-blue-600 mt-1">
+          สินค้าที่อยู่ใกล้ประตูท้าย = ใส่เข้าไปทีหลัง | สินค้าที่อยู่ลึกข้างใน = ใส่เข้าไปก่อน
+        </p>
+      </div>
+
       {/* View Description */}
       <div className="text-center text-xs text-gray-500">
-        {viewAngle === 'rear' && '🚪 มุมมองจากด้านท้ายรถ — เหมือนเปิดประตูท้ายแล้วมองเข้าไป สินค้าที่อยู่ใกล้จะชัดกว่า'}
-        {viewAngle === 'top' && '⬆️ มุมมองจากด้านบน — เห็นการกระจายตัวตามความยาวรถ'}
-        {viewAngle === 'side' && '👁️ มุมมองจากด้านข้าง — เห็นความสูงของสินค้าในแต่ละตำแหน่ง'}
-        {viewAngle === '3d' && '🎲 มุมมอง 3 มิติ — เห็นรูปร่างกล่องสินค้าทั้งหมด'}
+        {viewAngle === 'rear' && '🚪 มุมมองจากด้านท้ายรถ — เหมือนเปิดประตูท้ายแล้วมองเข้าไป สินค้าที่อยู่ใกล้ประตูจะชัดกว่า'}
+        {viewAngle === 'top' && '⬆️ มุมมองจากด้านบน — ด้านบน = ท้ายรถ (ประตู), ด้านล่าง = หน้ารถ'}
+        {viewAngle === 'side' && '👁️ มุมมองจากด้านข้าง — ด้านซ้าย = ท้ายรถ (ประตู), ด้านขวา = หน้ารถ'}
+        {viewAngle === '3d' && '🎲 มุมมอง 3 มิติ — ด้านซ้าย = ท้ายรถ (ประตู), ด้านขวา = หน้ารถ'}
         {' | '}🚛 {truck.name} — {truck.dimensions.width}×{truck.dimensions.length}×{truck.dimensions.height} ม. (กว้าง×ยาว×สูง)
       </div>
 
@@ -482,10 +592,12 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
             <li>ตรวจสอบว่าไม่มีสินค้าทับซ้อนกัน</li>
           </ol>
           <p>
-            <strong>พื้นที่ใช้ได้จริง:</strong> คูณด้วย usableSpace {truck.usableSpace}% (คิดจากทุกมิติ)
+            <strong>การบรรทุกจากด้านท้าย:</strong> ภาพแสดงการใส่ของจากประตูท้ายรถเข้าไปข้างใน
+            — สินค้าที่อยู่ใกล้ประตู (ด้านท้าย) ใส่เข้าไปทีหลัง
+            — สินค้าที่อยู่ลึกเข้าไปด้านใน ใส่เข้าไปก่อน
           </p>
           <p>
-            <strong>มุมมองด้านท้ายรถ:</strong> แสดงภาพเหมือนเปิดประตูท้ายรถแล้วมองเข้าไป — สินค้าที่อยู่ใกล้ประตู (ด้านท้าย) จะชัดเจนกว่า สินค้าที่อยู่ลึกเข้าไปด้านในจะจางลงเพื่อแสดงความลึก
+            <strong>พื้นที่ใช้ได้จริง:</strong> คูณด้วย usableSpace {truck.usableSpace}% (คิดจากทุกมิติ)
           </p>
           <p className="text-blue-500 italic">
             ⚠️ ผลลัพธ์เป็นการประมาณการ สินค้าจริงอาจวางได้ต่างเล็กน้อยขึ้นอยู่กับรูปทรงและการจัดเรียงจริง

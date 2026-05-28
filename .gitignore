@@ -30,25 +30,47 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files - NEVER commit .env to GitHub
+.env
+.env.local
+.env.production
+.env.staging
+
+# Allow .env.example to be committed
+!.env.example
 
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-local-*
-.claude
-.z-ai-config
+
+# logs
 *.log
 dev.log
 dev.out.log
+server.log
+
+# Internal/dev tools - not needed for production
+.claude
+.z-ai-config
+.zscripts/
+/skills/
+/mini-services/
+Caddyfile
+
+# Upload & download directories (user-specific)
+/upload/
+/download/
+
+# Database (contains runtime data)
+/db/
+
+# Worklog (dev-specific)
+worklog.md
+
+# Test & prompt directories
 test
 prompt
-
-server.log
-# Skills directory
-/skills/
+local-*
