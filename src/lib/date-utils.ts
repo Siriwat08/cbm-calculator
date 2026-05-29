@@ -138,21 +138,32 @@ export function thaiDateToISO(thaiDate: string): string {
   return convertThaiDateToISO(thaiDate);
 }
 
-// Get today's date in ISO format
+// Get today's date in ISO format (Bangkok timezone, NOT server UTC)
+// CRITICAL: Vercel servers run in UTC, so new Date() returns UTC time.
+// When it's 23:00 in Bangkok (May 29), UTC is already 00:00 (May 30).
+// We MUST use Asia/Bangkok timezone to get the correct date for Thailand.
 export function getTodayISO(): string {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = (today.getMonth() + 1).toString().padStart(2, '0');
-  const day = today.getDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
-// Get today's date in Thai format
+// Get today's date in Thai format (Bangkok timezone)
 export function getTodayThai(): string {
-  const today = new Date();
-  const day = today.getDate().toString().padStart(2, '0');
-  const month = (today.getMonth() + 1).toString().padStart(2, '0');
-  const year = (today.getFullYear() + 543).toString();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(new Date());
+
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const year = (parseInt(parts.find(p => p.type === 'year')?.value || '0') + 543).toString();
+
   return `${day}/${month}/${year}`;
 }
 

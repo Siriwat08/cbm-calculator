@@ -20,6 +20,8 @@ function unauthorizedResponse() {
 
 // ===== GET: Fetch current oil price =====
 export async function GET() {
+  const bangkokToday = getTodayISO();
+
   try {
     // 1. Get history from Edge Config (with full defensive handling)
     const history = await getOilPriceHistory();
@@ -37,6 +39,7 @@ export async function GET() {
         history: history,
         source: 'edge-config',
         livePrice: currentPrice, // Also send live price for comparison
+        bangkokToday,
       });
     }
 
@@ -48,27 +51,30 @@ export async function GET() {
         history: [currentPrice],
         source: 'bangchak-api',
         livePrice: currentPrice,
+        bangkokToday,
       });
     }
 
     // 5. Final fallback - use hardcoded value
     return NextResponse.json({
-      date: getTodayISO(),
+      date: bangkokToday,
       price: FALLBACK_DIESEL_PRICE,
       history: [],
       source: 'fallback',
       livePrice: null,
+      bangkokToday,
     });
 
   } catch (error) {
     console.error('Oil price API error:', error);
 
     return NextResponse.json({
-      date: getTodayISO(),
+      date: bangkokToday,
       price: FALLBACK_DIESEL_PRICE,
       history: [],
       source: 'fallback',
       livePrice: null,
+      bangkokToday,
     });
   }
 }

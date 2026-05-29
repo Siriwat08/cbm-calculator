@@ -5,6 +5,7 @@ import {
   setToEdgeConfig,
   fetchFromBangchak,
   cleanupGreetingKey,
+  getTodayISO,
   HISTORY_KEY,
   MAX_HISTORY_ENTRIES,
 } from '@/lib/oil-price-api';
@@ -20,7 +21,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  console.log('Cron job started at:', new Date().toISOString());
+  const bangkokToday = getTodayISO();
+  const utcNow = new Date().toISOString();
+  console.log(`[Cron] Started — UTC: ${utcNow}, Bangkok today: ${bangkokToday}`);
 
   // Clean up legacy greeting key (fire and forget)
   cleanupGreetingKey().catch(() => {});
@@ -30,17 +33,19 @@ export async function GET(request: NextRequest) {
 
     // Get existing history (with defensive handling)
     let history = await getOilPriceHistory();
+    console.log(`[Cron] Existing history: ${history.length} entries`);
 
     if (!currentPrice) {
       // If Bangchak API fails, try to use latest history price
       if (history.length > 0) {
-        console.log('Bangchak API failed, keeping latest history price');
+        console.log('[Cron] Bangchak API failed, keeping latest history price');
         return NextResponse.json({
           success: true,
           message: 'Bangchak API unavailable, kept latest stored price',
           date: history[0].date,
           price: history[0].price,
           history: history,
+          bangkokToday,
         });
       }
 
@@ -50,20 +55,22 @@ export async function GET(request: NextRequest) {
       }, { status: 500 });
     }
 
+    console.log(`[Cron] Bangchak price: ${currentPrice.price} บาท — effective date: ${currentPrice.date} (Bangkok today: ${bangkokToday})`);
+
     const existingIndex = history.findIndex(h => h.date === currentPrice.date);
 
     if (existingIndex === -1) {
       history = [currentPrice, ...history].slice(0, MAX_HISTORY_ENTRIES);
-      console.log('Adding new date:', currentPrice.date);
+      console.log(`[Cron] Adding new entry for ${currentPrice.date} — total: ${history.length}`);
     } else {
       history[existingIndex] = currentPrice;
-      console.log('Updated price for:', currentPrice.date);
+      console.log(`[Cron] Updated existing entry for ${currentPrice.date}`);
     }
 
     const saved = await setToEdgeConfig(HISTORY_KEY, history);
 
     if (saved) {
-      console.log('Oil price history saved:', history.length, 'days');
+      console.log(`[Cron] ✅ Saved ${history.length} history entries to Edge Config`);
 
       return NextResponse.json({
         success: true,
@@ -71,8 +78,10 @@ export async function GET(request: NextRequest) {
         date: currentPrice.date,
         price: currentPrice.price,
         history: history,
+        bangkokToday,
       });
     } else {
+      console.error('[Cron] ❌ Failed to save to Edge Config');
       return NextResponse.json({
         success: false,
         error: 'Failed to save to Edge Config',
@@ -80,7 +89,7 @@ export async function GET(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Cron error:', error);
+    console.error('[Cron] Error:', error);
     return NextResponse.json({
       success: false,
       error: 'Internal error'
