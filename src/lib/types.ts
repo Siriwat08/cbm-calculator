@@ -1,10 +1,8 @@
 // ===== Core Types =====
 
-export interface OilPrice {
-  date: string; // ISO format: YYYY-MM-DD for storage
-  price: number;
-  manual?: boolean;
-}
+// Re-export OilPriceEntry as the canonical oil price type
+// (defined in oil-price-api.ts as the single source of truth)
+export type { OilPriceEntry as OilPrice } from './oil-price-api';
 
 export interface OilRange {
   min: number;

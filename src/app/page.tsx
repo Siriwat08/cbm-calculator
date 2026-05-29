@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
-import { truckTypes, FALLBACK_OIL_PRICE, getTruckByJobKey, LABOR_COST } from '@/lib/truck-data';
+import { truckTypes, getTruckByJobKey } from '@/lib/truck-data';
+import { FALLBACK_DIESEL_PRICE, LABOR_COST, CARGO_LIMITS } from '@/lib/oil-price-api';
 import { performBinPacking } from '@/lib/bin-packing';
 import { formatDisplayDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
 import { useToast } from '@/hooks/use-toast';
-import { CARGO_LIMITS } from '@/lib/oil-price-api';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 
 export default function Home() {
@@ -15,7 +15,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
 
   // ===== Oil Price State =====
-  const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
+  const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
   const [oilPriceHistory, setOilPriceHistory] = useState<OilPrice[]>([]);
   const [loadingOil, setLoadingOil] = useState(true);
   const [liveOilPrice, setLiveOilPrice] = useState<number | null>(null);
@@ -24,7 +24,7 @@ export default function Home() {
   const [showOilPriceForm, setShowOilPriceForm] = useState(false);
   const [manualPrice, setManualPrice] = useState<string>('');
   const [usingManualPrice, setUsingManualPrice] = useState(false);
-  const [originalOilPrice, setOriginalOilPrice] = useState<number>(FALLBACK_OIL_PRICE);
+  const [originalOilPrice, setOriginalOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
 
   // ===== Price Calculator State =====
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
@@ -83,7 +83,7 @@ export default function Home() {
 
   // Calculated price derived from rate data, job, distance, and oil price
   const { calculatedPrice, priceDetails } = useMemo(() => {
-    if (!rateData || !distance || !currentOilPrice) {
+    if (!rateData || !distance || currentOilPrice == null) {
       return { calculatedPrice: null, priceDetails: null };
     }
 
@@ -142,6 +142,23 @@ export default function Home() {
 
   // ===== Data Fetching Effects =====
 
+  // Helper: apply oil price API response to state (eliminates duplication)
+  const applyOilPriceData = useCallback((data: { price?: number; livePrice?: { price?: number } | null; history?: OilPrice[] }) => {
+    if (data.price !== undefined && data.price !== null) {
+      setCurrentOilPrice(data.price);
+      // If user had a manual price, update original to the new server price
+      if (usingManualPrice) {
+        setOriginalOilPrice(data.price);
+      }
+    }
+    if (data.livePrice?.price) {
+      setLiveOilPrice(data.livePrice.price);
+    }
+    if (data.history && data.history.length > 0) {
+      setOilPriceHistory(data.history);
+    }
+  }, [usingManualPrice]);
+
   // Load admin API key from localStorage
   useEffect(() => {
     const storedKey = localStorage.getItem('admin_api_key');
@@ -191,15 +208,7 @@ export default function Home() {
       })
       .then((data) => {
         if (cancelled) return;
-        if (data.price !== undefined && data.price !== null) {
-          setCurrentOilPrice(data.price);
-        }
-        if (data.livePrice?.price) {
-          setLiveOilPrice(data.livePrice.price);
-        }
-        if (data.history && data.history.length > 0) {
-          setOilPriceHistory(data.history);
-        }
+        applyOilPriceData(data);
       })
       .catch((error) => {
         console.error('Failed to fetch oil price:', error);
@@ -209,7 +218,7 @@ export default function Home() {
         if (!cancelled) setLoadingOil(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [applyOilPriceData, toast]);
 
   // Manual refresh for oil price (used by refresh button and delete handler)
   const refreshOilPrice = useCallback(async () => {
@@ -218,23 +227,14 @@ export default function Home() {
       const res = await fetch('/api/oil-price');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
-      if (data.price !== undefined && data.price !== null) {
-        setCurrentOilPrice(data.price);
-      }
-      if (data.livePrice?.price) {
-        setLiveOilPrice(data.livePrice.price);
-      }
-      if (data.history && data.history.length > 0) {
-        setOilPriceHistory(data.history);
-      }
+      applyOilPriceData(data);
     } catch (error) {
       console.error('Failed to fetch oil price:', error);
       toast({ title: 'โหลดราคาน้ำมันล้มเหลว', description: 'ใช้ราคาสำรองชั่วคราว', variant: 'destructive' });
     } finally {
       setLoadingOil(false);
     }
-  }, [toast]);
+  }, [applyOilPriceData, toast]);
 
   // ===== Handlers =====
   const goToPriceCalculator = (truck: TruckType) => {
@@ -269,7 +269,7 @@ export default function Home() {
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
   const addCargoItem = () => {
-    setCargoItems([...cargoItems, { id: Date.now().toString(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
+    setCargoItems([...cargoItems, { id: crypto.randomUUID(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
   };
 
   const removeCargoItem = (id: string) => {
@@ -578,7 +578,7 @@ export default function Home() {
             <section className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">⛽ ราคาน้ำมันดีเซล</h2>
-                <p className="text-emerald-100 text-sm">อ้างอิง: บริษัท ปตท. น้ำมันและการค้าปลีก จำกัด (มหาชน)</p>
+                <p className="text-emerald-100 text-sm">อ้างอิง: บริษัท บางจาก คอร์ปอเรชัน จำกัด (มหาชน)</p>
                 <p className="text-emerald-100 text-xs mt-0.5">ราคาขายปลีก กทม. และปริมณฑล (หน่วยแสดงเป็น บาท/ลิตร)</p>
               </div>
               <div className="p-4">
@@ -623,14 +623,16 @@ export default function Home() {
                           );
                         })}
                         {oilPriceHistory.length > 10 && (
-                          <div className="text-center pt-2">
-                            <button
-                              onClick={() => setShowAllHistory(!showAllHistory)}
-                              className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-                            >
-                              {showAllHistory ? '▲ แสดงน้อยลง' : `▼ แสดงเพิ่มเติม (${oilPriceHistory.length - 10} รายการ)`}
-                            </button>
-                          </div>
+                          <tr>
+                            <td colSpan={5} className="text-center pt-2">
+                              <button
+                                onClick={() => setShowAllHistory(!showAllHistory)}
+                                className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+                              >
+                                {showAllHistory ? '▲ แสดงน้อยลง' : `▼ แสดงเพิ่มเติม (${oilPriceHistory.length - 10} รายการ)`}
+                              </button>
+                            </td>
+                          </tr>
                         )}
                       </tbody>
                     </table>

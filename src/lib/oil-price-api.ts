@@ -41,9 +41,16 @@ export function validateApiKey(request: NextRequest): boolean {
     request.headers.get('authorization')?.replace('Bearer ', '') ||
     new URL(request.url).searchParams.get('apiKey');
 
-  // Allow if ADMIN_API_KEY env var is not set (development mode)
+  // Deny admin operations if ADMIN_API_KEY is not configured in production
   const adminKey = process.env.ADMIN_API_KEY;
-  if (!adminKey) return true;
+  if (!adminKey) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Auth] ADMIN_API_KEY not set — admin operations blocked in production');
+      return false;
+    }
+    console.warn('[Auth] ADMIN_API_KEY not set — allowing all requests (dev mode)');
+    return true;
+  }
 
   return apiKey === adminKey;
 }
@@ -162,11 +169,19 @@ export async function setToEdgeConfig(key: string, value: unknown): Promise<bool
 export async function fetchFromBangchak(): Promise<{ date: string; price: number } | null> {
   try {
     const url = 'https://oil-price.bangchak.co.th/ApiOilPrice2/th';
+
+    // Abort after 8 seconds to prevent hanging the serverless function
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch(url, {
       headers: { 'Accept': 'application/json' },
       cache: 'no-store',
       next: { revalidate: 0 },
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) return null;
 

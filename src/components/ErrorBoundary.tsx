@@ -10,15 +10,16 @@ interface ErrorBoundaryProps {
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
+  resetKey: number;
 }
 
 export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, resetKey: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
@@ -27,7 +28,8 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: null });
+    // Increment key to force remount of children — prevents infinite error loop
+    this.setState({ hasError: false, error: null, resetKey: this.state.resetKey + 1 });
   };
 
   render() {
@@ -55,6 +57,6 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
       );
     }
 
-    return this.props.children;
+    return <div key={this.state.resetKey}>{this.props.children}</div>;
   }
 }

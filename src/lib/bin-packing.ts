@@ -34,10 +34,10 @@ interface PlacedBox {
   itemIndex: number;
 }
 
-// All 6 possible rotations of a 3D box
+// All 6 possible rotations of a 3D box (deduplicated for cubes/square prisms)
 function getRotations(box: Box3D): Box3D[] {
   const { width: w, length: l, height: h } = box;
-  return [
+  const all = [
     { width: w, length: l, height: h },
     { width: w, length: h, height: l },
     { width: l, length: w, height: h },
@@ -45,6 +45,14 @@ function getRotations(box: Box3D): Box3D[] {
     { width: h, length: w, height: l },
     { width: h, length: l, height: w },
   ];
+  // Deduplicate: for a cube all 6 are identical, for a square prism some overlap
+  const seen = new Set<string>();
+  return all.filter(r => {
+    const key = `${r.width}-${r.length}-${r.height}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Check if a box can fit in a space
@@ -253,6 +261,13 @@ export function performBinPacking(
             otherIdx !== idx && isSpaceInside(space, other)
           );
         });
+
+        // Cap available spaces to prevent unbounded growth (O(n²) cleanup)
+        // Keep only the largest 50 spaces — sufficient for typical cargo scenarios
+        if (availableSpaces.length > 50) {
+          availableSpaces.sort((a, b) => (b.width * b.length * b.height) - (a.width * a.length * a.height));
+          availableSpaces = availableSpaces.slice(0, 50);
+        }
 
         placed = true;
       }
