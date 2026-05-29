@@ -30,6 +30,10 @@ export default function Home() {
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [priceDetails, setPriceDetails] = useState<{ oilRange: string; distRange: string } | null>(null);
 
+  // ===== Labor State =====
+  const [includeLabor, setIncludeLabor] = useState(false);
+  const LABOR_COST = 500;
+
   // ===== CBM Calculator State =====
   const [selectedTruck, setSelectedTruck] = useState<TruckType>(truckTypes[0]);
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([
@@ -634,16 +638,78 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Labor Option */}
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                  <button
+                    onClick={() => setIncludeLabor(!includeLabor)}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg transition-all ${
+                      includeLabor
+                        ? 'bg-amber-100 border-2 border-amber-400 shadow-md'
+                        : 'bg-white border-2 border-gray-200 hover:border-amber-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${
+                        includeLabor
+                          ? 'bg-amber-500 border-amber-500'
+                          : 'border-gray-300'
+                      }`}>
+                        {includeLabor && (
+                          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="text-left">
+                        <p className="font-bold text-gray-800">👷 เพิ่มแรงงานยกสินค้า</p>
+                        <p className="text-xs text-gray-500">ค่าแรงงานยกสินค้าขึ้น-ลงรถ</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-amber-600 text-lg">+฿{LABOR_COST.toLocaleString()}</p>
+                      <p className="text-xs text-gray-400">ต่อเที่ยว</p>
+                    </div>
+                  </button>
+                  {includeLabor && (
+                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-700">
+                      ✅ เพิ่มค่าแรงงานยกสินค้า ฿{LABOR_COST.toLocaleString()} เข้าไปในยอดรวมแล้ว
+                    </div>
+                  )}
+                </div>
+
+                {/* Price Result */}
                 {calculatedPrice !== null && priceDetails ? (
                   <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl p-6 border-2 border-emerald-200">
                     <div className="text-center">
                       <p className="text-gray-600 mb-2">ราคาค่าขนส่ง</p>
                       <p className="text-4xl font-bold text-emerald-600">฿{calculatedPrice.toLocaleString()}</p>
+
+                      {/* Breakdown */}
+                      {includeLabor && (
+                        <div className="mt-3 bg-white/80 rounded-lg p-4 text-left space-y-2">
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>🚛 ค่าขนส่ง</span>
+                            <span className="font-medium">฿{calculatedPrice.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between text-sm text-amber-700">
+                            <span>👷 ค่าแรงงานยกสินค้า</span>
+                            <span className="font-medium">฿{LABOR_COST.toLocaleString()}</span>
+                          </div>
+                          <div className="border-t border-emerald-200 pt-2 mt-2">
+                            <div className="flex justify-between">
+                              <span className="font-bold text-gray-800">รวมทั้งหมด</span>
+                              <span className="font-bold text-emerald-600 text-2xl">฿{(calculatedPrice + LABOR_COST).toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="mt-4 text-sm text-gray-500 space-y-1">
                         <p>🚛 ประเภทรถ: {selectedTruck.name}</p>
                         <p>⛽ ช่วงราคาน้ำมัน: {priceDetails.oilRange}</p>
                         <p>📏 ช่วงระยะทาง: {priceDetails.distRange}</p>
                         <p>💵 ราคาน้ำมันที่ใช้คำนวณ: {currentOilPrice.toFixed(2)} บาท</p>
+                        {includeLabor && <p>👷 ค่าแรงงานยกสินค้า: ฿{LABOR_COST.toLocaleString()}</p>}
                       </div>
                     </div>
                   </div>
