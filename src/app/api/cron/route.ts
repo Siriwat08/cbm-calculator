@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const HISTORY_KEY = 'oil-price-history';
+const LEGACY_KEY = 'oil-price'; // Old single-value key
 
 // ===== API Key Auth =====
 function validateApiKey(request: NextRequest): boolean {
@@ -29,21 +30,64 @@ function convertThaiDateToISO(dateStr: string): string {
       const [day, month, yearStr] = parts;
       const year = parseInt(yearStr);
       if (!isNaN(year)) {
-        // If Buddhist era (> 2400), convert to Christian era
         const christianYear = year > 2400 ? year - 543 : year;
         return `${christianYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
       }
     }
   }
 
-  // Return as-is if can't parse
   return dateStr;
+}
+
+// ===== Normalize any Edge Config data into a proper history array =====
+function normalizeToHistoryArray(
+  raw: unknown
+): { date: string; price: number; manual?: boolean }[] {
+  if (raw === null || raw === undefined) return [];
+
+  if (Array.isArray(raw)) {
+    return raw.filter(
+      (item) => item && typeof item === 'object' && typeof item.price === 'number'
+    ) as { date: string; price: number; manual?: boolean }[];
+  }
+
+  if (typeof raw === 'number') {
+    const today = new Date();
+    const day = today.getDate().toString().padStart(2, '0');
+    const month = (today.getMonth() + 1).toString().padStart(2, '0');
+    const year = today.getFullYear().toString();
+    return [{ date: `${year}-${month}-${day}`, price: raw }];
+  }
+
+  if (typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.price === 'number') {
+      const dateStr = typeof obj.date === 'string' ? obj.date : new Date().toISOString().split('T')[0];
+      return [{ date: convertThaiDateToISO(dateStr), price: obj.price, manual: obj.manual === true }];
+    }
+  }
+
+  if (typeof raw === 'string') {
+    const num = parseFloat(raw);
+    if (!isNaN(num) && num > 0) {
+      const today = new Date();
+      const day = today.getDate().toString().padStart(2, '0');
+      const month = (today.getMonth() + 1).toString().padStart(2, '0');
+      const year = today.getFullYear().toString();
+      return [{ date: `${year}-${month}-${day}`, price: num }];
+    }
+  }
+
+  console.warn('Unknown Edge Config data format:', typeof raw, raw);
+  return [];
 }
 
 // Migrate old history entries that use Thai dates to ISO format
 async function migrateHistoryDates(
-  history: { date: string; price: number }[]
-): Promise<{ date: string; price: number }[]> {
+  history: { date: string; price: number; manual?: boolean }[]
+): Promise<{ date: string; price: number; manual?: boolean }[]> {
+  if (!Array.isArray(history) || history.length === 0) return history;
+
   let needsSave = false;
 
   const migrated = history.map(entry => {
@@ -67,6 +111,61 @@ async function migrateHistoryDates(
   }
 
   return migrated;
+}
+
+/**
+ * Migrate legacy Edge Config key ('oil-price') to the new format ('oil-price-history').
+ */
+async function migrateLegacyKey(): Promise<{ date: string; price: number; manual?: boolean }[] | null> {
+  const edgeConfigId = process.env.EDGE_CONFIG_ID;
+  const apiToken = process.env.VERCEL_API_TOKEN;
+  if (!edgeConfigId || !apiToken) return null;
+
+  try {
+    const response = await fetch(
+      `https://api.vercel.com/v1/edge-config/${edgeConfigId}/item/${LEGACY_KEY}`,
+      {
+        headers: { 'Authorization': `Bearer ${apiToken}` },
+        cache: 'no-store',
+      }
+    );
+
+    if (!response.ok) return null;
+
+    const legacyData = await response.json();
+    if (legacyData === null || legacyData === undefined) return null;
+
+    console.log('Found legacy oil-price key, migrating to oil-price-history...');
+
+    const migrated = normalizeToHistoryArray(legacyData);
+    if (migrated.length > 0) {
+      const saved = await setToEdgeConfig(HISTORY_KEY, migrated);
+      if (saved) {
+        console.log('Legacy data migrated to oil-price-history:', migrated);
+        try {
+          await fetch(
+            `https://api.vercel.com/v1/edge-config/${edgeConfigId}/items`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                items: [{ operation: 'delete', key: LEGACY_KEY }],
+              }),
+            }
+          );
+        } catch {
+          // Ignore deletion failure
+        }
+      }
+    }
+
+    return migrated;
+  } catch {
+    return null;
+  }
 }
 
 // ===== Edge Config Read =====
@@ -144,7 +243,6 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     );
 
     if (diesel) {
-      // Extract date from remark for accurate date
       const remarkMatch = oilData.OilRemark2?.match(/วันที่\s*(\d+)\s*(\S+)\s*(\d+)/);
       let isoDate: string;
 
@@ -160,14 +258,12 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
 
         const month = months[thaiMonth] || '01';
         let buddhistYear = remarkMatch[3];
-        // Handle 2-digit Buddhist year (e.g. "69" means 2569)
         if (buddhistYear.length <= 2) {
           buddhistYear = '25' + buddhistYear.padStart(2, '0');
         }
         const christianYear = parseInt(buddhistYear) - 543;
         isoDate = `${christianYear}-${month}-${day}`;
       } else {
-        // Fallback: use today's date in ISO format
         const today = new Date();
         const day = today.getDate().toString().padStart(2, '0');
         const month = (today.getMonth() + 1).toString().padStart(2, '0');
@@ -183,6 +279,33 @@ async function fetchOilPrice(): Promise<{ date: string; price: number } | null> 
     console.error('Fetch oil price error:', error);
     return null;
   }
+}
+
+/**
+ * Get oil price history from Edge Config with full defensive handling.
+ */
+async function getOilPriceHistory(): Promise<{ date: string; price: number; manual?: boolean }[]> {
+  // 1. Try reading from the new key
+  const rawData = await getFromEdgeConfig<unknown>(HISTORY_KEY);
+  let history = normalizeToHistoryArray(rawData);
+
+  // 2. If new key is empty, try migrating from legacy key
+  if (history.length === 0) {
+    const legacyHistory = await migrateLegacyKey();
+    if (legacyHistory && legacyHistory.length > 0) {
+      history = legacyHistory;
+    }
+  }
+
+  // 3. Migrate Thai dates to ISO format
+  if (history.length > 0) {
+    history = await migrateHistoryDates(history);
+  }
+
+  // 4. Sort by date descending
+  history.sort((a, b) => b.date.localeCompare(a.date));
+
+  return history;
 }
 
 // ===== CRON HANDLER =====
@@ -201,9 +324,8 @@ export async function GET(request: NextRequest) {
   try {
     const currentPrice = await fetchOilPrice();
 
-    // Get existing history and migrate Thai dates to ISO
-    let history = await getFromEdgeConfig<{ date: string; price: number }[]>(HISTORY_KEY) || [];
-    history = await migrateHistoryDates(history);
+    // Get existing history (with defensive handling)
+    let history = await getOilPriceHistory();
 
     if (!currentPrice) {
       // If Bangchak API fails, try to use latest history price
