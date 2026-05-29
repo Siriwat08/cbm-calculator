@@ -45,7 +45,13 @@ export default function Home() {
   const [showAllHistory, setShowAllHistory] = useState(false);
 
   // ===== Admin API Key (stored in localStorage) =====
-  const [adminApiKey, setAdminApiKey] = useState<string>('');
+  // Use lazy initializer to read from localStorage without useEffect (avoids ESLint react-hooks/set-state-in-effect)
+  const [adminApiKey, setAdminApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('admin_api_key') || '';
+    }
+    return '';
+  });
 
   // ===== Toast notifications =====
   const { toast } = useToast();
@@ -158,12 +164,6 @@ export default function Home() {
       setOilPriceHistory(data.history);
     }
   }, [usingManualPrice]);
-
-  // Load admin API key from localStorage
-  useEffect(() => {
-    const storedKey = localStorage.getItem('admin_api_key');
-    if (storedKey) setAdminApiKey(storedKey);
-  }, []);
 
   const saveAdminApiKey = (key: string) => {
     setAdminApiKey(key);
