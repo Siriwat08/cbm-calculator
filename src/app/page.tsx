@@ -136,7 +136,10 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     fetch('/transport_rates.json')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data: RateData) => {
         if (cancelled) return;
         setRateData(data);
@@ -157,7 +160,10 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     fetch('/api/oil-price')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         if (cancelled) return;
         if (data.price !== undefined && data.price !== null) {
@@ -182,6 +188,7 @@ export default function Home() {
     setLoadingOil(true);
     try {
       const res = await fetch('/api/oil-price');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
       if (data.price !== undefined && data.price !== null) {
@@ -217,15 +224,18 @@ export default function Home() {
   const totalCBM = cargoItems.reduce((sum, item) => sum + calculateCBM(item), 0);
   const totalWeight = cargoItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
 
-  const getRecommendedTruck = () => {
+  // Memoize recommended truck — performBinPacking is expensive, avoid recalculating on every render
+  const recommendedTruck = useMemo(() => {
+    if (cargoItems.length === 0 || totalCBM <= 0) return null;
+    const allValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
+    if (!allValid) return null;
     for (const truck of truckTypes) {
       const result = performBinPacking(cargoItems, truck);
       if (result.canFitAll && totalWeight <= truck.maxWeight) return truck;
     }
     return null;
-  };
+  }, [cargoItems, totalCBM, totalWeight]);
 
-  const recommendedTruck = cargoItems.length > 0 && totalCBM > 0 ? getRecommendedTruck() : null;
   const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
