@@ -1,5 +1,5 @@
 import { TruckType } from './types';
-import { FALLBACK_DIESEL_PRICE } from './oil-price-api';
+import { FALLBACK_DIESEL_PRICE, LABOR_COST } from './oil-price-api';
 
 export const truckTypes: TruckType[] = [
   {
@@ -36,6 +36,9 @@ export const truckTypes: TruckType[] = [
 
 /** @deprecated Use FALLBACK_DIESEL_PRICE from oil-price-api instead */
 export const FALLBACK_OIL_PRICE = FALLBACK_DIESEL_PRICE;
+
+/** @deprecated Use LABOR_COST from oil-price-api instead */
+export { LABOR_COST };
 
 export function getTruckByJobKey(jobKey: string): TruckType | undefined {
   return truckTypes.find(t => t.jobKey === jobKey);

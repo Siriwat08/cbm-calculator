@@ -10,12 +10,23 @@
  */
 
 import { NextRequest } from 'next/server';
+import { getTodayISO, convertThaiDateToISO } from './date-utils';
 
 // ===== Constants =====
 export const HISTORY_KEY = 'oil-price-history';
 export const LEGACY_KEY = 'oil-price'; // Old single-value key
-export const FALLBACK_DIESEL_PRICE = 32.00; // Approximate Thai diesel price (บาท/ลิตร)
+export const GREETING_KEY = 'greeting'; // Legacy test key to clean up
+export const FALLBACK_DIESEL_PRICE = 42.25; // Thai diesel price as of May 2026 (บาท/ลิตร)
 export const MAX_HISTORY_ENTRIES = 90;
+export const MAX_OIL_PRICE = 200; // Maximum allowed oil price in THB
+export const LABOR_COST = 500; // Labor cost per trip in THB
+
+// ===== Validation Constants =====
+export const CARGO_LIMITS = {
+  MAX_DIMENSION_CM: 2000,
+  MAX_WEIGHT_KG: 50000,
+  MAX_QUANTITY: 1000,
+} as const;
 
 // ===== Oil Price Entry Type =====
 export interface OilPriceEntry {
@@ -37,30 +48,8 @@ export function validateApiKey(request: NextRequest): boolean {
   return apiKey === adminKey;
 }
 
-// ===== Date Migration: Thai (DD/MM/BBBB) → ISO (YYYY-MM-DD) =====
-export function convertThaiDateToISO(dateStr: string): string {
-  if (!dateStr) return dateStr;
-
-  // Already ISO format (YYYY-MM-DD)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
-
-  // Thai format (DD/MM/BBBB) e.g. "27/05/2569"
-  if (dateStr.includes('/')) {
-    const parts = dateStr.split('/');
-    if (parts.length === 3) {
-      const [day, month, yearStr] = parts;
-      const year = parseInt(yearStr);
-      if (!isNaN(year)) {
-        // If Buddhist era (> 2400), convert to Christian era
-        const christianYear = year > 2400 ? year - 543 : year;
-        return `${christianYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      }
-    }
-  }
-
-  // Return as-is if can't parse
-  return dateStr;
-}
+// Re-export date utilities for backward compatibility
+export { convertThaiDateToISO, getTodayISO } from './date-utils';
 
 // ===== Normalize any Edge Config data into a proper history array =====
 export function normalizeToHistoryArray(raw: unknown): OilPriceEntry[] {
@@ -352,11 +341,34 @@ export async function getOilPriceHistory(): Promise<OilPriceEntry[]> {
   return history;
 }
 
-// ===== Helper: Get today's date in ISO format =====
-export function getTodayISO(): string {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = (today.getMonth() + 1).toString().padStart(2, '0');
-  const day = today.getDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
+/**
+ * Auto-delete the 'greeting' legacy test key from Edge Config.
+ * This key was created during initial testing and is no longer needed.
+ */
+export async function cleanupGreetingKey(): Promise<void> {
+  const edgeConfigId = process.env.EDGE_CONFIG_ID;
+  const apiToken = process.env.VERCEL_API_TOKEN;
+  if (!edgeConfigId || !apiToken) return;
+
+  try {
+    // Check if greeting key exists
+    const response = await fetch(
+      `https://api.vercel.com/v1/edge-config/${edgeConfigId}/item/${GREETING_KEY}`,
+      { headers: { 'Authorization': `Bearer ${apiToken}` }, cache: 'no-store' }
+    );
+    if (!response.ok) return; // Key doesn't exist
+
+    // Delete it
+    await fetch(
+      `https://api.vercel.com/v1/edge-config/${edgeConfigId}/items`,
+      {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ operation: 'delete', key: GREETING_KEY }] }),
+      }
+    );
+    console.log('Cleaned up legacy greeting key from Edge Config');
+  } catch {
+    // Ignore cleanup failure
+  }
 }

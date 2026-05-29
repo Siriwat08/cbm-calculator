@@ -108,22 +108,34 @@ export function formatThaiDate(isoDate: string): string {
 }
 
 // Convert Thai date (DD/MM/BBBB) to ISO (YYYY-MM-DD)
+// Also works as the robust version that handles both Buddhist and Christian era years
+export function convertThaiDateToISO(dateStr: string): string {
+  if (!dateStr) return '';
+
+  // Already ISO format (YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  // Thai format (DD/MM/BBBB) e.g. "27/05/2569"
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const [day, month, yearStr] = parts;
+      const year = parseInt(yearStr);
+      if (!isNaN(year)) {
+        // If Buddhist era (> 2400), convert to Christian era
+        const christianYear = year > 2400 ? year - 543 : year;
+        return `${christianYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+  }
+
+  // Return as-is if can't parse
+  return dateStr;
+}
+
+/** @deprecated Use convertThaiDateToISO instead — it handles both Buddhist and Christian era years */
 export function thaiDateToISO(thaiDate: string): string {
-  if (!thaiDate) return '';
-
-  // Already ISO format
-  if (thaiDate.includes('-') && thaiDate.split('-').length === 3) {
-    return thaiDate;
-  }
-
-  const parts = thaiDate.split('/');
-  if (parts.length === 3) {
-    const [day, month, year] = parts;
-    const christianYear = parseInt(year) - 543;
-    return `${christianYear}-${month}-${day}`;
-  }
-
-  return thaiDate;
+  return convertThaiDateToISO(thaiDate);
 }
 
 // Get today's date in ISO format

@@ -4,6 +4,7 @@ import {
   getOilPriceHistory,
   setToEdgeConfig,
   fetchFromBangchak,
+  cleanupGreetingKey,
   HISTORY_KEY,
   MAX_HISTORY_ENTRIES,
 } from '@/lib/oil-price-api';
@@ -20,6 +21,9 @@ export async function GET(request: NextRequest) {
   }
 
   console.log('Cron job started at:', new Date().toISOString());
+
+  // Clean up legacy greeting key (fire and forget)
+  cleanupGreetingKey().catch(() => {});
 
   try {
     const currentPrice = await fetchFromBangchak();

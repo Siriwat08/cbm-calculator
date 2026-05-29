@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
-import { truckTypes, FALLBACK_OIL_PRICE, getTruckByJobKey } from '@/lib/truck-data';
+import { truckTypes, FALLBACK_OIL_PRICE, getTruckByJobKey, LABOR_COST } from '@/lib/truck-data';
 import { performBinPacking } from '@/lib/bin-packing';
 import { formatDisplayDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
+import { useToast } from '@/hooks/use-toast';
+import { CARGO_LIMITS } from '@/lib/oil-price-api';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 
 export default function Home() {
@@ -30,7 +32,6 @@ export default function Home() {
 
   // ===== Labor State =====
   const [includeLabor, setIncludeLabor] = useState(false);
-  const LABOR_COST = 500;
 
   // ===== CBM Calculator State =====
   const [selectedTruck, setSelectedTruck] = useState<TruckType>(truckTypes[0]);
@@ -39,6 +40,15 @@ export default function Home() {
   ]);
   const [showPopup, setShowPopup] = useState(false);
   const [popupImage, setPopupImage] = useState('');
+
+  // ===== Oil Price History Display =====
+  const [showAllHistory, setShowAllHistory] = useState(false);
+
+  // ===== Admin API Key (stored in localStorage) =====
+  const [adminApiKey, setAdminApiKey] = useState<string>('');
+
+  // ===== Toast notifications =====
+  const { toast } = useToast();
 
   // ===== Rate Data State =====
   const [rateData, setRateData] = useState<RateData | null>(null);
@@ -55,11 +65,11 @@ export default function Home() {
       else if (item.length < 0) errors[index.toString()] = `รายการ ${index + 1}: ความยาวต้องไม่ติดลบ`;
       else if (item.height < 0) errors[index.toString()] = `รายการ ${index + 1}: ความสูงต้องไม่ติดลบ`;
       else if (item.weight < 0) errors[index.toString()] = `รายการ ${index + 1}: น้ำหนักต้องไม่ติดลบ`;
-      else if (item.width > 2000) errors[index.toString()] = `รายการ ${index + 1}: ความกว้างเกิน 2,000 ซม.`;
-      else if (item.length > 2000) errors[index.toString()] = `รายการ ${index + 1}: ความยาวเกิน 2,000 ซม.`;
-      else if (item.height > 2000) errors[index.toString()] = `รายการ ${index + 1}: ความสูงเกิน 2,000 ซม.`;
-      else if (item.weight > 50000) errors[index.toString()] = `รายการ ${index + 1}: น้ำหนักเกิน 50,000 kg`;
-      else if (item.quantity > 1000) errors[index.toString()] = `รายการ ${index + 1}: จำนวนเกิน 1,000`;
+      else if (item.width > CARGO_LIMITS.MAX_DIMENSION_CM) errors[index.toString()] = `รายการ ${index + 1}: ความกว้างเกิน ${CARGO_LIMITS.MAX_DIMENSION_CM.toLocaleString()} ซม.`;
+      else if (item.length > CARGO_LIMITS.MAX_DIMENSION_CM) errors[index.toString()] = `รายการ ${index + 1}: ความยาวเกิน ${CARGO_LIMITS.MAX_DIMENSION_CM.toLocaleString()} ซม.`;
+      else if (item.height > CARGO_LIMITS.MAX_DIMENSION_CM) errors[index.toString()] = `รายการ ${index + 1}: ความสูงเกิน ${CARGO_LIMITS.MAX_DIMENSION_CM.toLocaleString()} ซม.`;
+      else if (item.weight > CARGO_LIMITS.MAX_WEIGHT_KG) errors[index.toString()] = `รายการ ${index + 1}: น้ำหนักเกิน ${CARGO_LIMITS.MAX_WEIGHT_KG.toLocaleString()} kg`;
+      else if (item.quantity > CARGO_LIMITS.MAX_QUANTITY) errors[index.toString()] = `รายการ ${index + 1}: จำนวนเกิน ${CARGO_LIMITS.MAX_QUANTITY.toLocaleString()}`;
     });
     return errors;
   }, [cargoItems]);
@@ -132,6 +142,18 @@ export default function Home() {
 
   // ===== Data Fetching Effects =====
 
+  // Load admin API key from localStorage
+  useEffect(() => {
+    const storedKey = localStorage.getItem('admin_api_key');
+    if (storedKey) setAdminApiKey(storedKey);
+  }, []);
+
+  const saveAdminApiKey = (key: string) => {
+    setAdminApiKey(key);
+    if (key) localStorage.setItem('admin_api_key', key);
+    else localStorage.removeItem('admin_api_key');
+  };
+
   // Load Rate Data - no synchronous setState in effect body
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +171,10 @@ export default function Home() {
           setSelectedJob(keys[0]);
         }
       })
-      .catch((err) => console.error('Failed to load rate data:', err))
+      .catch((err) => {
+        console.error('Failed to load rate data:', err);
+        toast({ title: 'โหลดข้อมูลล้มเหลว', description: 'ไม่สามารถโหลดอัตราค่าขนส่งได้', variant: 'destructive' });
+      })
       .finally(() => {
         if (!cancelled) setLoadingRates(false);
       });
@@ -176,7 +201,10 @@ export default function Home() {
           setOilPriceHistory(data.history);
         }
       })
-      .catch((error) => console.error('Failed to fetch oil price:', error))
+      .catch((error) => {
+        console.error('Failed to fetch oil price:', error);
+        toast({ title: 'โหลดราคาน้ำมันล้มเหลว', description: 'ใช้ราคาสำรองชั่วคราว', variant: 'destructive' });
+      })
       .finally(() => {
         if (!cancelled) setLoadingOil(false);
       });
@@ -202,10 +230,11 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Failed to fetch oil price:', error);
+      toast({ title: 'โหลดราคาน้ำมันล้มเหลว', description: 'ใช้ราคาสำรองชั่วคราว', variant: 'destructive' });
     } finally {
       setLoadingOil(false);
     }
-  }, []);
+  }, [toast]);
 
   // ===== Handlers =====
   const goToPriceCalculator = (truck: TruckType) => {
@@ -283,11 +312,25 @@ export default function Home() {
   const deleteOilPrice = async (date: string) => {
     if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatDisplayDate(date)} ใช่หรือไม่?`)) return;
     try {
-      const res = await fetch(`/api/oil-price?date=${encodeURIComponent(date)}`, { method: 'DELETE' });
-      if (res.ok) await refreshOilPrice();
-      else alert('ไม่สามารถลบข้อมูลได้');
+      const headers: HeadersInit = {};
+      if (adminApiKey) headers['x-api-key'] = adminApiKey;
+      const res = await fetch(`/api/oil-price?date=${encodeURIComponent(date)}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.status === 401) {
+        toast({ title: 'ไม่มีสิทธิ์', description: 'กรุณาใส่รหัสแอดมินก่อนลบข้อมูล', variant: 'destructive' });
+        return;
+      }
+      if (res.ok) {
+        await refreshOilPrice();
+        toast({ title: 'ลบสำเร็จ', description: 'ลบราคาน้ำมันเรียบร้อยแล้ว' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast({ title: 'ลบไม่สำเร็จ', description: data.error || 'เกิดข้อผิดพลาด', variant: 'destructive' });
+      }
     } catch {
-      alert('เกิดข้อผิดพลาด');
+      toast({ title: 'เกิดข้อผิดพลาด', description: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', variant: 'destructive' });
     }
   };
 
@@ -387,23 +430,23 @@ export default function Home() {
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       <div>
                         <label className="text-xs text-gray-500 font-medium">กว้าง (ซม.) *</label>
-                        <input type="number" value={item.width || ''} onChange={(e) => updateCargoItem(item.id, 'width', parseFloat(e.target.value) || 0)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max="2000" step="0.1" />
+                        <input type="number" value={item.width || ''} onChange={(e) => updateCargoItem(item.id, 'width', parseFloat(e.target.value) || 0)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max={CARGO_LIMITS.MAX_DIMENSION_CM} step="0.1" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 font-medium">ยาว (ซม.) *</label>
-                        <input type="number" value={item.length || ''} onChange={(e) => updateCargoItem(item.id, 'length', parseFloat(e.target.value) || 0)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max="2000" step="0.1" />
+                        <input type="number" value={item.length || ''} onChange={(e) => updateCargoItem(item.id, 'length', parseFloat(e.target.value) || 0)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max={CARGO_LIMITS.MAX_DIMENSION_CM} step="0.1" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 font-medium">สูง (ซม.) *</label>
-                        <input type="number" value={item.height || ''} onChange={(e) => updateCargoItem(item.id, 'height', parseFloat(e.target.value) || 0)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max="2000" step="0.1" />
+                        <input type="number" value={item.height || ''} onChange={(e) => updateCargoItem(item.id, 'height', parseFloat(e.target.value) || 0)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max={CARGO_LIMITS.MAX_DIMENSION_CM} step="0.1" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 font-medium">จำนวน</label>
-                        <input type="number" value={item.quantity} onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 1)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" min="1" max="1000" />
+                        <input type="number" value={item.quantity} onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 1)} inputMode="numeric" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" min="1" max={CARGO_LIMITS.MAX_QUANTITY} />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 font-medium">น้ำหนัก (kg) *</label>
-                        <input type="number" value={item.weight || ''} onChange={(e) => updateCargoItem(item.id, 'weight', parseFloat(e.target.value) || 0)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max="50000" step="0.1" />
+                        <input type="number" value={item.weight || ''} onChange={(e) => updateCargoItem(item.id, 'weight', parseFloat(e.target.value) || 0)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max={CARGO_LIMITS.MAX_WEIGHT_KG} step="0.1" />
                       </div>
                     </div>
                     {item.width > 0 && item.length > 0 && item.height > 0 && (
@@ -557,7 +600,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody>
-                        {oilPriceHistory.slice(0, 10).map((item, index) => {
+                        {oilPriceHistory.slice(0, showAllHistory ? oilPriceHistory.length : 10).map((item, index) => {
                           let statusEmoji = '';
                           let statusText = '';
                           let statusColor = '';
@@ -579,6 +622,16 @@ export default function Home() {
                             </tr>
                           );
                         })}
+                        {oilPriceHistory.length > 10 && (
+                          <div className="text-center pt-2">
+                            <button
+                              onClick={() => setShowAllHistory(!showAllHistory)}
+                              className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+                            >
+                              {showAllHistory ? '▲ แสดงน้อยลง' : `▼ แสดงเพิ่มเติม (${oilPriceHistory.length - 10} รายการ)`}
+                            </button>
+                          </div>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -591,8 +644,36 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Manual Oil Price Input (session-only) */}
+                {/* Admin API Key (for delete operations) */}
                 <div className="mt-4 border-t pt-4">
+                  <details className="group">
+                    <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 transition">
+                      ⚙️ ตั้งค่าแอดมิน
+                    </summary>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="password"
+                        value={adminApiKey}
+                        onChange={(e) => saveAdminApiKey(e.target.value)}
+                        placeholder="รหัสแอดมิน (API Key)"
+                        className="flex-1 border-2 border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none"
+                        aria-label="รหัสแอดมินสำหรับลบข้อมูล"
+                      />
+                      {adminApiKey && (
+                        <button
+                          onClick={() => saveAdminApiKey('')}
+                          className="text-red-400 hover:text-red-600 text-xs px-2"
+                        >
+                          ล้าง
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">ใส่รหัสแอดมินเพื่อให้สามารถลบราคาน้ำมันได้ (บันทึกในเบราว์เซอร์)</p>
+                  </details>
+                </div>
+
+                {/* Manual Oil Price Input (session-only) */}
+                <div className="mt-3 border-t pt-4">
                   {usingManualPrice && (
                     <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
                       <div className="text-sm text-blue-800">
@@ -621,7 +702,7 @@ export default function Home() {
                       <p className="text-xs text-amber-600">⚠️ ราคานี้จะใช้คำนวณเฉพาะรอบนี้เท่านั้น จะไม่ถูกบันทึกลงระบบ</p>
                       <div>
                         <label className="text-xs text-gray-600 font-medium">ราคา (บาท/ลิตร)</label>
-                        <input type="number" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="เช่น 32.50" min="0.01" max="200" step="0.01" />
+                        <input type="number" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="เช่น 42.25" min="0.01" max="200" step="0.01" />
                       </div>
                       <div className="flex gap-2">
                         <button onClick={handleApplyManualPrice} disabled={!manualPrice} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50 transition">
@@ -652,7 +733,7 @@ export default function Home() {
                 <div>
                   <label className="block text-gray-700 font-medium mb-2">ระยะทาง <span className="text-red-500">*</span></label>
                   <div className="flex items-center gap-2">
-                    <input type="number" value={distance} onChange={(e) => { const val = parseFloat(e.target.value); if (val < 0) return; setDistance(e.target.value); }} placeholder="กรอกระยะทาง" className="flex-1 border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-emerald-500 focus:outline-none text-lg" min="1" />
+                    <input type="number" value={distance} onChange={(e) => { const val = parseFloat(e.target.value); if (val < 0) return; if (val === 0 && e.target.value.includes('0') && !e.target.value.includes('.')) { setDistance(''); return; } setDistance(e.target.value); }} inputMode="decimal" placeholder="กรอกระยะทาง" className="flex-1 border-2 border-gray-200 rounded-lg px-4 py-3 focus:border-emerald-500 focus:outline-none text-lg" min="1" aria-label="ระยะทางเป็นกิโลเมตร" />
                     <span className="text-gray-600 font-medium">กม.</span>
                   </div>
                 </div>
