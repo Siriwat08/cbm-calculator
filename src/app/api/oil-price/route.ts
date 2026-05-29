@@ -23,6 +23,64 @@ function unauthorizedResponse() {
   );
 }
 
+// ===== Date Migration: Thai (DD/MM/BBBB) → ISO (YYYY-MM-DD) =====
+function convertThaiDateToISO(dateStr: string): string {
+  if (!dateStr) return dateStr;
+
+  // Already ISO format (YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  // Thai format (DD/MM/BBBB) e.g. "27/05/2569"
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const [day, month, yearStr] = parts;
+      const year = parseInt(yearStr);
+      if (!isNaN(year)) {
+        // If Buddhist era (> 2400), convert to Christian era
+        const christianYear = year > 2400 ? year - 543 : year;
+        return `${christianYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+  }
+
+  // Return as-is if can't parse
+  return dateStr;
+}
+
+/**
+ * Migrate old history entries that use Thai dates to ISO format.
+ * Returns { migrated: boolean, history: migratedHistory }
+ * If any entry was converted, auto-saves back to Edge Config.
+ */
+async function migrateHistoryDates(
+  history: { date: string; price: number; manual?: boolean }[]
+): Promise<{ date: string; price: number; manual?: boolean }[]> {
+  let needsSave = false;
+
+  const migrated = history.map(entry => {
+    const isoDate = convertThaiDateToISO(entry.date);
+    if (isoDate !== entry.date) {
+      needsSave = true;
+      console.log(`Migrated date: ${entry.date} → ${isoDate}`);
+      return { ...entry, date: isoDate };
+    }
+    return entry;
+  });
+
+  if (needsSave) {
+    console.log('Auto-migrating history dates to ISO format...');
+    const saved = await setToEdgeConfig(HISTORY_KEY, migrated);
+    if (saved) {
+      console.log('Migration saved successfully');
+    } else {
+      console.error('Migration save failed');
+    }
+  }
+
+  return migrated;
+}
+
 // Edge Config helpers
 function getEdgeConfigId(): string | undefined {
   return process.env.EDGE_CONFIG_ID;
@@ -166,12 +224,18 @@ async function fetchFromBangchak(): Promise<{ date: string; price: number } | nu
 export async function GET() {
   try {
     // 1. Get history from Edge Config
-    const history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
+    let history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
 
-    // 2. Try to fetch current price from Bangchak
+    // 2. Auto-migrate old Thai dates to ISO format
+    history = await migrateHistoryDates(history);
+
+    // 3. Sort by date descending (ISO format sorts correctly as strings)
+    history.sort((a, b) => b.date.localeCompare(a.date));
+
+    // 4. Try to fetch current price from Bangchak
     const currentPrice = await fetchFromBangchak();
 
-    // 3. Return response - prioritize history (which may include manual entries)
+    // 5. Return response - prioritize history (which may include manual entries)
     if (history.length > 0) {
       // Use the latest entry from history as the current price
       const latest = history[0];
@@ -184,7 +248,7 @@ export async function GET() {
       });
     }
 
-    // 4. No history - use Bangchak current price
+    // 6. No history - use Bangchak current price
     if (currentPrice) {
       return NextResponse.json({
         date: currentPrice.date,
@@ -195,7 +259,7 @@ export async function GET() {
       });
     }
 
-    // 5. Final fallback - use hardcoded value
+    // 7. Final fallback - use hardcoded value
     return NextResponse.json({
       date: new Date().toISOString().split('T')[0],
       price: FALLBACK_PRICE,
@@ -244,8 +308,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get existing history
-    const history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
+    // Get existing history and migrate dates
+    let history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
+    history = await migrateHistoryDates(history);
 
     // Use provided date or today's date in ISO format
     let priceDate = date;
@@ -255,9 +320,12 @@ export async function POST(request: NextRequest) {
       const month = (today.getMonth() + 1).toString().padStart(2, '0');
       const year = today.getFullYear().toString();
       priceDate = `${year}-${month}-${day}`;
+    } else {
+      // Convert if Thai date provided
+      priceDate = convertThaiDateToISO(priceDate);
     }
 
-    // Validate date format
+    // Validate date format (now must be ISO)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(priceDate)) {
       return NextResponse.json(
         { error: 'รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)' },
@@ -320,7 +388,7 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const dateToDelete = searchParams.get('date');
+    let dateToDelete = searchParams.get('date');
 
     if (!dateToDelete) {
       return NextResponse.json(
@@ -329,7 +397,13 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
+    // Convert Thai date to ISO if needed
+    dateToDelete = convertThaiDateToISO(dateToDelete);
+
+    let history = await getFromEdgeConfig<{ date: string; price: number; manual?: boolean }[]>(HISTORY_KEY) || [];
+    // Migrate dates first so comparison works
+    history = await migrateHistoryDates(history);
+
     const filteredHistory = history.filter(entry => entry.date !== dateToDelete);
 
     if (filteredHistory.length === history.length) {

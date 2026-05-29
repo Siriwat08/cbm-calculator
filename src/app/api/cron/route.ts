@@ -15,6 +15,60 @@ function validateApiKey(request: NextRequest): boolean {
   return apiKey === adminKey;
 }
 
+// ===== Date Migration: Thai (DD/MM/BBBB) → ISO (YYYY-MM-DD) =====
+function convertThaiDateToISO(dateStr: string): string {
+  if (!dateStr) return dateStr;
+
+  // Already ISO format (YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+  // Thai format (DD/MM/BBBB) e.g. "27/05/2569"
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const [day, month, yearStr] = parts;
+      const year = parseInt(yearStr);
+      if (!isNaN(year)) {
+        // If Buddhist era (> 2400), convert to Christian era
+        const christianYear = year > 2400 ? year - 543 : year;
+        return `${christianYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+  }
+
+  // Return as-is if can't parse
+  return dateStr;
+}
+
+// Migrate old history entries that use Thai dates to ISO format
+async function migrateHistoryDates(
+  history: { date: string; price: number }[]
+): Promise<{ date: string; price: number }[]> {
+  let needsSave = false;
+
+  const migrated = history.map(entry => {
+    const isoDate = convertThaiDateToISO(entry.date);
+    if (isoDate !== entry.date) {
+      needsSave = true;
+      console.log(`Migrated date: ${entry.date} → ${isoDate}`);
+      return { ...entry, date: isoDate };
+    }
+    return entry;
+  });
+
+  if (needsSave) {
+    console.log('Auto-migrating history dates to ISO format...');
+    const saved = await setToEdgeConfig(HISTORY_KEY, migrated);
+    if (saved) {
+      console.log('Migration saved successfully');
+    } else {
+      console.error('Migration save failed');
+    }
+  }
+
+  return migrated;
+}
+
 // ===== Edge Config Read =====
 async function getFromEdgeConfig<T>(key: string): Promise<T | null> {
   const edgeConfigId = process.env.EDGE_CONFIG_ID;
@@ -147,9 +201,12 @@ export async function GET(request: NextRequest) {
   try {
     const currentPrice = await fetchOilPrice();
 
+    // Get existing history and migrate Thai dates to ISO
+    let history = await getFromEdgeConfig<{ date: string; price: number }[]>(HISTORY_KEY) || [];
+    history = await migrateHistoryDates(history);
+
     if (!currentPrice) {
       // If Bangchak API fails, try to use latest history price
-      const history = await getFromEdgeConfig<{ date: string; price: number }[]>(HISTORY_KEY) || [];
       if (history.length > 0) {
         console.log('Bangchak API failed, keeping latest history price');
         return NextResponse.json({
@@ -166,8 +223,6 @@ export async function GET(request: NextRequest) {
         error: 'Failed to fetch oil price and no history available'
       }, { status: 500 });
     }
-
-    let history = await getFromEdgeConfig<{ date: string; price: number }[]>(HISTORY_KEY) || [];
 
     const existingIndex = history.findIndex(h => h.date === currentPrice.date);
 
