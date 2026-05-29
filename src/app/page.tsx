@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { truckTypes, FALLBACK_OIL_PRICE, getTruckByJobKey } from '@/lib/truck-data';
 import { performBinPacking } from '@/lib/bin-packing';
-import { formatThaiDate, formatDisplayDate, getTodayISO } from '@/lib/date-utils';
+import { formatDisplayDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 
@@ -27,8 +27,6 @@ export default function Home() {
   // ===== Price Calculator State =====
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
   const [distance, setDistance] = useState<string>('');
-  const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
-  const [priceDetails, setPriceDetails] = useState<{ oilRange: string; distRange: string } | null>(null);
 
   // ===== Labor State =====
   const [includeLabor, setIncludeLabor] = useState(false);
@@ -41,62 +39,16 @@ export default function Home() {
   ]);
   const [showPopup, setShowPopup] = useState(false);
   const [popupImage, setPopupImage] = useState('');
-  const [binPackingResult, setBinPackingResult] = useState<BinPackingResult | null>(null);
 
   // ===== Rate Data State =====
   const [rateData, setRateData] = useState<RateData | null>(null);
   const [availableJobs, setAvailableJobs] = useState<string[]>([]);
   const [loadingRates, setLoadingRates] = useState(true);
 
-  // ===== Validation State =====
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  // ===== Derived State (useMemo instead of useEffect+setState) =====
 
-  // ===== Load Rate Data =====
-  useEffect(() => {
-    setLoadingRates(true);
-    fetch('/transport_rates.json')
-      .then((res) => res.json())
-      .then((data: RateData) => {
-        setRateData(data);
-        const keys = Object.keys(data);
-        setAvailableJobs(keys);
-        if (keys.length > 0) {
-          setSelectedJob(keys[0]);
-        }
-      })
-      .catch((err) => console.error('Failed to load rate data:', err))
-      .finally(() => setLoadingRates(false));
-  }, []);
-
-  // ===== Fetch Oil Price =====
-  const fetchOilPrice = useCallback(async () => {
-    setLoadingOil(true);
-    try {
-      const res = await fetch('/api/oil-price');
-      const data = await res.json();
-
-      if (data.price !== undefined && data.price !== null) {
-        setCurrentOilPrice(data.price);
-      }
-      if (data.livePrice?.price) {
-        setLiveOilPrice(data.livePrice.price);
-      }
-      if (data.history && data.history.length > 0) {
-        setOilPriceHistory(data.history);
-      }
-    } catch (error) {
-      console.error('Failed to fetch oil price:', error);
-    } finally {
-      setLoadingOil(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchOilPrice();
-  }, [fetchOilPrice]);
-
-  // ===== Validate Cargo Items =====
-  useEffect(() => {
+  // Validation errors derived from cargo items
+  const validationErrors = useMemo<Record<string, string>>(() => {
     const errors: Record<string, string> = {};
     cargoItems.forEach((item, index) => {
       if (item.width < 0) errors[index.toString()] = `รายการ ${index + 1}: ความกว้างต้องไม่ติดลบ`;
@@ -109,40 +61,30 @@ export default function Home() {
       else if (item.weight > 50000) errors[index.toString()] = `รายการ ${index + 1}: น้ำหนักเกิน 50,000 kg`;
       else if (item.quantity > 1000) errors[index.toString()] = `รายการ ${index + 1}: จำนวนเกิน 1,000`;
     });
-    setValidationErrors(errors);
+    return errors;
   }, [cargoItems]);
 
-  // ===== 3D Bin Packing =====
-  useEffect(() => {
+  // Bin packing result derived from cargo items and selected truck
+  const binPackingResult = useMemo<BinPackingResult | null>(() => {
     const allValid = cargoItems.every(item => item.width > 0 && item.length > 0 && item.height > 0);
-    if (!allValid) {
-      setBinPackingResult(null);
-      return;
-    }
-    const result = performBinPacking(cargoItems, selectedTruck);
-    setBinPackingResult(result);
+    if (!allValid) return null;
+    return performBinPacking(cargoItems, selectedTruck);
   }, [cargoItems, selectedTruck]);
 
-  // ===== Calculate Price =====
-  useEffect(() => {
+  // Calculated price derived from rate data, job, distance, and oil price
+  const { calculatedPrice, priceDetails } = useMemo(() => {
     if (!rateData || !distance || !currentOilPrice) {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
-      return;
+      return { calculatedPrice: null, priceDetails: null };
     }
 
     const jobData = rateData[selectedJob];
     if (!jobData) {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
-      return;
+      return { calculatedPrice: null, priceDetails: null };
     }
 
     const dist = parseFloat(distance);
     if (isNaN(dist) || dist <= 0) {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
-      return;
+      return { calculatedPrice: null, priceDetails: null };
     }
 
     let oilIndex = -1;
@@ -182,13 +124,81 @@ export default function Home() {
     if (distIndex >= 0 && jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
       const price = jobData.data[distIndex].prices[oilIndex];
       const oilRange = `${jobData.oil_ranges[oilIndex].min} - ${jobData.oil_ranges[oilIndex].max} บาท`;
-      setCalculatedPrice(price);
-      setPriceDetails({ oilRange, distRange });
-    } else {
-      setCalculatedPrice(null);
-      setPriceDetails(null);
+      return { calculatedPrice: price, priceDetails: { oilRange, distRange } };
     }
+
+    return { calculatedPrice: null, priceDetails: null };
   }, [rateData, selectedJob, distance, currentOilPrice]);
+
+  // ===== Data Fetching Effects =====
+
+  // Load Rate Data - no synchronous setState in effect body
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/transport_rates.json')
+      .then((res) => res.json())
+      .then((data: RateData) => {
+        if (cancelled) return;
+        setRateData(data);
+        const keys = Object.keys(data);
+        setAvailableJobs(keys);
+        if (keys.length > 0) {
+          setSelectedJob(keys[0]);
+        }
+      })
+      .catch((err) => console.error('Failed to load rate data:', err))
+      .finally(() => {
+        if (!cancelled) setLoadingRates(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch Oil Price - no synchronous setState in effect body
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/oil-price')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.price !== undefined && data.price !== null) {
+          setCurrentOilPrice(data.price);
+        }
+        if (data.livePrice?.price) {
+          setLiveOilPrice(data.livePrice.price);
+        }
+        if (data.history && data.history.length > 0) {
+          setOilPriceHistory(data.history);
+        }
+      })
+      .catch((error) => console.error('Failed to fetch oil price:', error))
+      .finally(() => {
+        if (!cancelled) setLoadingOil(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Manual refresh for oil price (used by refresh button and delete handler)
+  const refreshOilPrice = useCallback(async () => {
+    setLoadingOil(true);
+    try {
+      const res = await fetch('/api/oil-price');
+      const data = await res.json();
+
+      if (data.price !== undefined && data.price !== null) {
+        setCurrentOilPrice(data.price);
+      }
+      if (data.livePrice?.price) {
+        setLiveOilPrice(data.livePrice.price);
+      }
+      if (data.history && data.history.length > 0) {
+        setOilPriceHistory(data.history);
+      }
+    } catch (error) {
+      console.error('Failed to fetch oil price:', error);
+    } finally {
+      setLoadingOil(false);
+    }
+  }, []);
 
   // ===== Handlers =====
   const goToPriceCalculator = (truck: TruckType) => {
@@ -234,7 +244,6 @@ export default function Home() {
   const resetForm = () => {
     setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
     setSelectedTruck(truckTypes[0]);
-    setBinPackingResult(null);
   };
 
   const openPopup = (image: string) => { setPopupImage(image); setShowPopup(true); };
@@ -265,7 +274,7 @@ export default function Home() {
     if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatDisplayDate(date)} ใช่หรือไม่?`)) return;
     try {
       const res = await fetch(`/api/oil-price?date=${encodeURIComponent(date)}`, { method: 'DELETE' });
-      if (res.ok) await fetchOilPrice();
+      if (res.ok) await refreshOilPrice();
       else alert('ไม่สามารถลบข้อมูลได้');
     } catch {
       alert('เกิดข้อผิดพลาด');
@@ -568,7 +577,7 @@ export default function Home() {
                     <p className="text-gray-600 mb-2">ราคาน้ำมันดีเซล</p>
                     <p className="text-3xl font-bold text-orange-600">{currentOilPrice.toFixed(2)} บาท</p>
                     <p className="text-sm text-orange-500 mt-2">⚠️ ใช้ข้อมูลประมาณการ</p>
-                    <button onClick={() => fetchOilPrice()} className="mt-3 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm hover:bg-emerald-600">🔄 ลองโหลดใหม่</button>
+                    <button onClick={refreshOilPrice} className="mt-3 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm hover:bg-emerald-600">🔄 ลองโหลดใหม่</button>
                   </div>
                 )}
 
@@ -715,33 +724,27 @@ export default function Home() {
                   </div>
                 ) : distance && loadingRates ? (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800">⏳ กำลังโหลดข้อมูลอัตราค่าขนส่ง...</div>
-                ) : distance && rateData && !calculatedPrice ? (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">❌ ไม่พบราคาสำหรับระยะทาง {distance} กม.</div>
                 ) : null}
               </div>
             </section>
-
-            <button onClick={() => setActiveTab('cbm')} className="w-full py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300">📦 กลับไปคำนวณ CBM</button>
-          </div>
-        )}
-
-        {/* Image Popup */}
-        {showPopup && (
-          <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowPopup(false)}>
-            <div className="relative max-w-2xl w-full max-h-[90vh] overflow-hidden rounded-xl bg-white p-2" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => setShowPopup(false)} className="absolute top-4 right-4 z-10 bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-500 transition">✕</button>
-              <div className="relative w-full h-[80vh]">
-                <Image src={popupImage} alt="รายละเอียดรถ" fill style={{ objectFit: 'contain' }} />
-              </div>
-            </div>
           </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-800 text-slate-400 text-center py-3 text-xs mt-auto">
-        หจก.เผ่าปัญญา ทรานสปอร์ต — เครื่องมือช่วยคำนวณการขนส่ง
+      <footer className="bg-slate-800 text-slate-400 text-center py-4 px-4 text-sm">
+        <p>© 2026 หจก.เผ่าปัญญา ทรานสปอร์ต — เครื่องมือช่วยคำนวณการขนส่ง</p>
       </footer>
+
+      {/* Image Popup */}
+      {showPopup && popupImage && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setShowPopup(false)}>
+          <div className="relative max-w-4xl max-h-[90vh]">
+            <Image src={popupImage} alt="Truck detail" width={1200} height={800} className="max-h-[90vh] w-auto object-contain rounded-lg" />
+            <button onClick={() => setShowPopup(false)} className="absolute top-2 right-2 bg-white text-gray-800 w-8 h-8 rounded-full font-bold shadow hover:bg-gray-100">✕</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
