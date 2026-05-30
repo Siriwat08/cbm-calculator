@@ -121,7 +121,14 @@ export async function getFromEdgeConfig<T>(key: string): Promise<T | null> {
       console.warn(`Edge Config read failed for key "${key}": ${response.status} ${response.statusText}`);
       return null;
     }
-    return await response.json() as T;
+    const data = await response.json();
+    // The /item/{key} endpoint returns { createdAt, key, value, edgeConfigId, updatedAt }
+    // We only need the .value property (the actual stored data)
+    if (data && typeof data === 'object' && 'value' in data && 'key' in data) {
+      return data.value as T;
+    }
+    // Fallback: if the response doesn't have the expected wrapper, return as-is
+    return data as T;
   } catch (error) {
     console.error('Edge Config read error:', error);
     return null;
@@ -287,8 +294,14 @@ export async function migrateLegacyKey(): Promise<OilPriceEntry[] | null> {
 
     if (!response.ok) return null;
 
-    const legacyData = await response.json();
-    if (legacyData === null || legacyData === undefined) return null;
+    const legacyRaw = await response.json();
+    if (legacyRaw === null || legacyRaw === undefined) return null;
+
+    // The /item/{key} endpoint wraps the data in { createdAt, key, value, ... }
+    // Extract the .value property if present
+    const legacyData = (legacyRaw && typeof legacyRaw === 'object' && 'value' in legacyRaw && 'key' in legacyRaw)
+      ? legacyRaw.value
+      : legacyRaw;
 
     console.log('Found legacy oil-price key, migrating to oil-price-history...');
 
