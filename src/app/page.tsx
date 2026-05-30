@@ -578,8 +578,7 @@ export default function Home() {
             <section className="bg-white rounded-xl shadow-lg overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white px-6 py-4">
                 <h2 className="text-lg font-bold">⛽ ราคาน้ำมันดีเซล</h2>
-                <p className="text-emerald-100 text-sm">อ้างอิง: บริษัท บางจาก คอร์ปอเรชัน จำกัด (มหาชน)</p>
-                <p className="text-emerald-100 text-xs mt-0.5">ราคาขายปลีก กทม. และปริมณฑล (หน่วยแสดงเป็น บาท/ลิตร)</p>
+                <p className="text-emerald-100 text-xs">ราคาขายปลีก กทม. และปริมณฑล (หน่วย: บาท/ลิตร)</p>
               </div>
               <div className="p-4">
                 {loadingOil ? (
@@ -694,7 +693,7 @@ export default function Home() {
                       </button>
                       {liveOilPrice !== null && liveOilPrice !== currentOilPrice && (
                         <button onClick={() => setCurrentOilPrice(liveOilPrice)} className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition">
-                          🔄 ใช้ราคาล่าสุดจากปตท. ({liveOilPrice.toFixed(2)} บาท)
+                          🔄 ใช้ราคาล่าสุดจากระบบ ({liveOilPrice.toFixed(2)} บาท)
                         </button>
                       )}
                     </div>
