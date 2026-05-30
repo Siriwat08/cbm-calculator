@@ -173,6 +173,8 @@ export async function setToEdgeConfig(key: string, value: unknown): Promise<bool
 }
 
 // ===== Bangchak API =====
+// NOTE: หน้าจอแสดงชื่อ "ปตท." แต่ระบบ API ดึงข้อมูลจาก Bangchak (บางจาก) เหมือนเดิม
+// อย่าเปลี่ยน API endpoint นี้ — มันทำงานถูกต้องแล้ว
 export async function fetchFromBangchak(): Promise<{ date: string; price: number } | null> {
   try {
     const url = 'https://oil-price.bangchak.co.th/ApiOilPrice2/th';
