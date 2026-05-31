@@ -23,6 +23,47 @@ datasource db {
 }
 
 // ============================================================
+// General: Key-Value Settings Store
+// ============================================================
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ============================================================
+// Feature 3: Auto Distance Lookup — Saved Routes
+// ============================================================
+
+model Route {
+  id              String    @id @default(cuid())
+  originName      String
+  originLat       Float?
+  originLng       Float?
+  destinationName String
+  destinationLat  Float?
+  destinationLng  Float?
+  distance        Float
+  duration        Float?
+  useCount        Int       @default(0)
+  isFavorite      Boolean   @default(false)
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([originName, destinationName])
+  @@index([isFavorite])
+  @@index([useCount])
+  @@map("routes")
+}
+
+// ============================================================
 // Feature 1 & 2: Quotation Generator + Multi-Trip Calculator
 // ============================================================
 
@@ -33,6 +74,7 @@ model Quotation {
 
   customerName    String
   customerPhone   String?
+  customerEmail   String?
   customerAddress String?
 
   origin          String
@@ -127,46 +169,4 @@ enum QuotationStatus {
   REJECTED
   EXPIRED
   CANCELLED
-}
-
-// ============================================================
-// Feature 3: Auto Distance Lookup — Saved Routes
-// ============================================================
-
-model Route {
-  id              String   @id @default(cuid())
-  originName      String
-  originLat       Float?
-  originLng       Float?
-  destinationName String
-  destinationLat  Float?
-  destinationLng  Float?
-  distance        Float
-  duration        Float?
-  useCount        Int      @default(0)
-  isFavorite      Boolean  @default(false)
-
-  lastUsedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([originName, destinationName])
-  @@index([isFavorite])
-  @@index([useCount])
-  @@map("routes")
-}
-
-// ============================================================
-// General: Key-Value Settings Store
-// ============================================================
-
-model Setting {
-  id    String @id @default(cuid())
-  key   String @unique
-  value String
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("settings")
 }
