@@ -10,10 +10,11 @@ import BinPackingVisualization from '@/components/BinPackingVisualization';
 import DistanceLookup from '@/components/DistanceLookup';
 import { useToast } from '@/hooks/use-toast';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
+import MultiTripCalculator from '@/components/MultiTripCalculator';
 
 export default function Home() {
   // ===== Tab State =====
-  const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
+  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'multitrip'>('cbm');
 
   // ===== Oil Price State =====
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
@@ -303,6 +304,9 @@ export default function Home() {
           </button>
           <button onClick={() => setActiveTab('price')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'price' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             💰 คำนวณราคา
+          </button>
+          <button onClick={() => setActiveTab('multitrip')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'multitrip' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            🚚 Multi-Trip
           </button>
         </div>
       </div>
@@ -718,6 +722,77 @@ export default function Home() {
                 )}
               </div>
             </section>
+          </div>
+        )}
+
+        {/* ===== Multi-Trip Calculator Tab ===== */}
+        {activeTab === 'multitrip' && (
+          <div className="space-y-6">
+            {/* Distance & Oil Price Quick Settings */}
+            <section className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="bg-gradient-to-r from-violet-600 to-purple-700 text-white px-6 py-4">
+                <h2 className="text-lg font-bold">⚙️ ตั้งค่าการคำนวณ</h2>
+                <p className="text-violet-100 text-sm">ระบุระยะทางและเลือกตัวเลือกเพิ่มเติม</p>
+              </div>
+              <div className="p-4 space-y-4">
+                {/* Distance Input */}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-gray-500 font-medium">ระยะทาง (กม.)</label>
+                    <button
+                      onClick={() => setActiveTab('price')}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                    >
+                      🗺️ ไปค้นหาระยะทาง
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    value={distance}
+                    onChange={(e) => setDistance(e.target.value)}
+                    inputMode="decimal"
+                    className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-violet-500 focus:outline-none"
+                    placeholder="เช่น 150"
+                    min="1"
+                    step="0.1"
+                  />
+                  {routeDescription && (
+                    <p className="text-xs text-blue-600 mt-1">🛣️ {routeDescription}</p>
+                  )}
+                </div>
+
+                {/* Oil Price Display */}
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">ราคาน้ำมันดีเซล</span>
+                    <span className="font-bold text-violet-600">{currentOilPrice.toFixed(2)} บาท/ลิตร</span>
+                  </div>
+                </div>
+
+                {/* Labor Toggle */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="multitrip-labor"
+                    checked={includeLabor}
+                    onChange={(e) => setIncludeLabor(e.target.checked)}
+                    className="w-4 h-4 accent-violet-700"
+                  />
+                  <label htmlFor="multitrip-labor" className="text-sm text-gray-700">
+                    เพิ่มค่าแรง ({LABOR_COST.toLocaleString()} บาท/เที่ยว)
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            {/* Multi-Trip Calculator Component */}
+            <MultiTripCalculator
+              cargoItems={cargoItems}
+              distance={parseFloat(distance) || 0}
+              oilPrice={currentOilPrice}
+              rateData={rateData}
+              includeLabor={includeLabor}
+            />
           </div>
         )}
       </main>
