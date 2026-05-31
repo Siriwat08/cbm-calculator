@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDb } from '@/lib/db';
 
 /**
  * GET /api/routes?favorite=true|false
@@ -9,6 +9,7 @@ import { db } from '@/lib/db';
  */
 export async function GET(request: NextRequest) {
   try {
+    const db = getDb();
     const favoriteOnly = request.nextUrl.searchParams.get('favorite') === 'true';
 
     const routes = await db.route.findMany({

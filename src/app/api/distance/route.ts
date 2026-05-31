@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { geocode, getRoute } from '@/lib/ors-api';
-import { db } from '@/lib/db';
+import { getDb } from '@/lib/db';
 
 /**
  * GET /api/distance?origin=...&destination=...
@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
   const destTrimmed = destinationText.trim();
 
   try {
+    const db = getDb();
+
     // 1. Check DB by raw search text (zero API calls)
     const bySearchText = await db.route.findMany({
       where: {

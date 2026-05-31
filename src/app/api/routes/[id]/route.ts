@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDb } from '@/lib/db';
 
 /**
  * PATCH /api/routes/[id]
@@ -11,6 +11,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const db = getDb();
     const { id } = await params;
     const body = await request.json();
 
@@ -56,6 +57,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const db = getDb();
     // Check admin API key
     const apiKey = request.headers.get('x-api-key') ||
       request.headers.get('authorization')?.replace('Bearer ', '') ||

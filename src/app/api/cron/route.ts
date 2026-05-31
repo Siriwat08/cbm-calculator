@@ -57,14 +57,32 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Cron] Bangchak price: ${currentPrice.price} บาท — effective date: ${currentPrice.date} (Bangkok today: ${bangkokToday})`);
 
-    const existingIndex = history.findIndex(h => h.date === currentPrice.date);
-
-    if (existingIndex === -1) {
-      history = [currentPrice, ...history].slice(0, MAX_HISTORY_ENTRIES);
-      console.log(`[Cron] Adding new entry for ${currentPrice.date} — total: ${history.length}`);
+    // IMPORTANT: Always ensure we have an entry for today's date.
+    // Bangchak reports the date when price was last CHANGED,
+    // but if price hasn't changed today, that date stays stale (e.g. 30/05).
+    // We create/update an entry for today so the UI always shows the current date.
+    const todayEntry = { date: bangkokToday, price: currentPrice.price };
+    const todayIndex = history.findIndex(h => h.date === bangkokToday);
+    if (todayIndex === -1) {
+      // No entry for today yet → add it at the top
+      history = [todayEntry, ...history].slice(0, MAX_HISTORY_ENTRIES);
+      console.log(`[Cron] Adding today's entry for ${bangkokToday} — total: ${history.length}`);
     } else {
-      history[existingIndex] = currentPrice;
-      console.log(`[Cron] Updated existing entry for ${currentPrice.date}`);
+      // Update existing today entry with latest price
+      history[todayIndex] = todayEntry;
+      console.log(`[Cron] Updated existing today entry for ${bangkokToday}`);
+    }
+
+    // Also preserve the Bangchak effective date entry if it's different from today
+    // (This keeps the historical record of when the price actually changed)
+    if (currentPrice.date !== bangkokToday) {
+      const effectiveIndex = history.findIndex(h => h.date === currentPrice.date);
+      if (effectiveIndex === -1) {
+        history.push(currentPrice);
+        history.sort((a, b) => b.date.localeCompare(a.date));
+        history = history.slice(0, MAX_HISTORY_ENTRIES);
+        console.log(`[Cron] Also preserved Bangchak effective date entry for ${currentPrice.date}`);
+      }
     }
 
     const saved = await setToEdgeConfig(HISTORY_KEY, history);
@@ -75,7 +93,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: 'Oil price saved successfully',
-        date: currentPrice.date,
+        date: bangkokToday,
         price: currentPrice.price,
         history: history,
         bangkokToday,

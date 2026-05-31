@@ -66,6 +66,9 @@ export default function Home() {
   // ===== Distance Lookup Ref =====
   const distanceLookupRef = useRef<HTMLDivElement>(null);
 
+  // ===== Reset Trigger for DistanceLookup =====
+  const [resetTrigger, setResetTrigger] = useState(0);
+
   // ===== Derived State =====
   const validationErrors = useMemo<Record<string, string>>(() => {
     const errors: Record<string, string> = {};
@@ -238,6 +241,27 @@ export default function Home() {
   const removeCargoItem = (id: string) => { if (cargoItems.length > 1) setCargoItems(cargoItems.filter((item) => item.id !== id)); };
   const updateCargoItem = (id: string, field: keyof CargoItem, value: number) => setCargoItems(cargoItems.map((item) => item.id === id ? { ...item, [field]: value } : item));
   const resetForm = () => { setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]); setSelectedTruck(truckTypes[0]); };
+
+  // Reset ALL data across both tabs
+  const resetAllData = () => {
+    if (!confirm('ต้องการรีเซ็ตข้อมูลทั้งหมดใช่หรือไม่? ข้อมูลทุกหน้าจะถูกล้าง')) return;
+    // CBM tab
+    setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
+    setSelectedTruck(truckTypes[0]);
+    // Price tab
+    setSelectedJob(availableJobs.length > 0 ? availableJobs[0] : '4ล้อ_PPY');
+    setDistance('');
+    setRouteDescription('');
+    setIncludeLabor(false);
+    // Manual oil price override
+    setUsingManualPrice(false);
+    setManualPrice('');
+    setShowOilPriceForm(false);
+    setCurrentOilPrice(originalOilPrice);
+    // Reset DistanceLookup
+    setResetTrigger(prev => prev + 1);
+    toast({ title: 'รีเซ็ตสำเร็จ', description: 'ข้อมูลทั้งหมดถูกล้างแล้ว' });
+  };
   const openPopup = (image: string) => { setPopupImage(image); setShowPopup(true); };
 
   const handleApplyManualPrice = () => {
@@ -493,7 +517,7 @@ export default function Home() {
             {hasValidationErrors && totalCBM > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-800">⚠️ กรุณาแก้ไขข้อผิดพลาดในรายการสินค้าก่อนดูผลลัพธ์</div>
             )}
-            <button onClick={resetForm} className="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300">🔄 รีเซ็ตข้อมูล</button>
+            <button onClick={resetAllData} className="w-full bg-red-100 text-red-700 py-3 rounded-lg font-medium hover:bg-red-200 border border-red-200">🔄 รีเซ็ตข้อมูลทั้งหมด</button>
           </div>
         )}
 
@@ -617,6 +641,7 @@ export default function Home() {
             <DistanceLookup
               onApplyDistance={handleApplyDistance}
               distanceRef={distanceLookupRef}
+              resetTrigger={resetTrigger}
             />
 
             {/* Price Calculator Card */}
@@ -722,6 +747,9 @@ export default function Home() {
                 )}
               </div>
             </section>
+
+            {/* Reset All Button */}
+            <button onClick={resetAllData} className="w-full bg-red-100 text-red-700 py-3 rounded-lg font-medium hover:bg-red-200 border border-red-200">🔄 รีเซ็ตข้อมูลทั้งหมด</button>
           </div>
         )}
 

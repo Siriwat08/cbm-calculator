@@ -39,6 +39,7 @@ interface DistanceResult {
 interface DistanceLookupProps {
   onApplyDistance: (distanceKm: number, originName: string, destinationName: string) => void;
   distanceRef?: React.RefObject<HTMLDivElement | null>;
+  resetTrigger?: number; // Increment to trigger reset
 }
 
 // ===== Autocomplete Input Component =====
@@ -146,7 +147,7 @@ function AutocompleteInput({
 }
 
 // ===== Main Distance Lookup Component =====
-export default function DistanceLookup({ onApplyDistance, distanceRef }: DistanceLookupProps) {
+export default function DistanceLookup({ onApplyDistance, distanceRef, resetTrigger }: DistanceLookupProps) {
   const { toast } = useToast();
 
   // Input state
@@ -162,6 +163,17 @@ export default function DistanceLookup({ onApplyDistance, distanceRef }: Distanc
   // Saved routes state
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
+
+  // Reset internal state when resetTrigger changes
+  useEffect(() => {
+    if (resetTrigger && resetTrigger > 0) {
+      setOriginText('');
+      setDestinationText('');
+      setSelectedOrigin(null);
+      setSelectedDestination(null);
+      setDistanceResult(null);
+    }
+  }, [resetTrigger]);
 
   // Load saved routes
   const loadSavedRoutes = useCallback(async () => {

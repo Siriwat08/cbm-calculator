@@ -1,32 +1,30 @@
-/**
- * Prisma Client Singleton with PostgreSQL Adapter
- *
- * Uses @prisma/adapter-pg to connect Prisma to Vercel Postgres (Neon).
- * Prisma 6+ with "client" engine type requires either an adapter or accelerateUrl.
- *
- * IMPORTANT: This file must work during Next.js build time.
- * If DATABASE_URL is not available (e.g., during static analysis),
- * the pool/adapter creation is deferred until first actual use.
- */
-
 import { PrismaClient } from '@prisma/client'
-import { PrismaPg } from '@prisma/adapter-pg'
-import pg from 'pg'
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
+  prisma: PrismaClient | undefined;
+};
 
+/**
+ * Create a PrismaClient with appropriate adapter.
+ *
+ * - PostgreSQL URL → uses @prisma/adapter-pg (required by Prisma 7 engine type "client")
+ * - No URL or SQLite → returns a bare PrismaClient (will fail at runtime if DB ops are attempted)
+ *
+ * Uses lazy initialization so the client is only created when actually needed (at runtime),
+ * not during Next.js build when DATABASE_URL may not be available.
+ */
 function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || ''
 
-  if (!connectionString) {
-    console.warn('[DB] No DATABASE_URL or POSTGRES_URL found — Prisma operations will fail at runtime')
-    // Return a bare client; it will throw a clear error if actually used
+  if (!connectionString || connectionString.startsWith('file:')) {
+    console.warn('[DB] No PostgreSQL URL found — Prisma operations will fail at runtime')
     return new PrismaClient()
   }
 
-  const pool = new pg.Pool({ connectionString })
+  // Dynamically import to avoid build-time errors when pg is not needed
+  const { PrismaPg } = require('@prisma/adapter-pg')
+  const { Pool } = require('pg')
+  const pool = new Pool({ connectionString })
   const adapter = new PrismaPg(pool)
 
   return new PrismaClient({
@@ -35,8 +33,15 @@ function createPrismaClient(): PrismaClient {
   })
 }
 
-export const db = globalForPrisma.prisma ?? createPrismaClient()
+let _prisma: PrismaClient | undefined;
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+export function getDb(): PrismaClient {
+  if (!_prisma) {
+    _prisma = globalForPrisma.prisma ?? createPrismaClient();
+    if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = _prisma;
+  }
+  return _prisma;
+}
 
-export default db
+// Default export for convenience (lazy getter)
+export default getDb;
