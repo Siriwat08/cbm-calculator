@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { getDb } from '@/lib/db';
 
 /**
  * POST /api/setup-db
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // Test database connection
+    const db = getDb();
     await db.$queryRaw`SELECT 1`;
 
     if (action === 'push') {
@@ -215,6 +216,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET() {
   try {
+    const db = getDb();
     await db.$queryRaw`SELECT 1`;
 
     const settingsCount = await db.setting.count();
