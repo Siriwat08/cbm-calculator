@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { truckTypes, getTruckByJobKey } from '@/lib/truck-data';
 import { FALLBACK_DIESEL_PRICE, LABOR_COST, CARGO_LIMITS } from '@/lib/oil-price-api';
 import { performBinPacking } from '@/lib/bin-packing';
-import { formatDisplayDate } from '@/lib/date-utils';
+import { formatDisplayDate, formatThaiDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
 import DistanceLookup from '@/components/DistanceLookup';
 import { useToast } from '@/hooks/use-toast';
@@ -282,7 +282,7 @@ export default function Home() {
   };
 
   const deleteOilPrice = async (date: string) => {
-    if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatDisplayDate(date)} ใช่หรือไม่?`)) return;
+    if (!confirm(`ต้องการลบราคาน้ำมันวันที่ ${formatThaiDate(date)} ใช่หรือไม่?`)) return;
     try {
       const headers: HeadersInit = {};
       if (adminApiKey) headers['x-api-key'] = adminApiKey;
@@ -562,7 +562,7 @@ export default function Home() {
                           const isCurrent = index === 0;
                           return (
                             <tr key={item.date} className={`border-b ${isCurrent ? 'bg-emerald-50 font-bold' : ''}`}>
-                              <td className="py-2 px-3 text-left text-gray-700">{formatDisplayDate(item.date)}</td>
+                              <td className="py-2 px-3 text-left text-gray-700">{formatThaiDate(item.date)}</td>
                               <td className={`py-2 px-3 text-center text-sm font-medium ${statusColor}`}>{statusEmoji} {statusText}</td>
                               <td className="py-2 px-3 text-center">{isCurrent && <span className="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded">ใช้คำนวณ</span>}</td>
                               <td className={`py-2 px-3 text-right ${isCurrent ? 'text-emerald-600 text-lg' : 'text-gray-900'}`}>{item.price.toFixed(2)}</td>
