@@ -5,10 +5,12 @@ export async function GET(request: NextRequest) {
   try {
     const favoriteOnly = request.nextUrl.searchParams.get('favorite') === 'true';
 
-    const routes = await db.route.findMany({
-      where: favoriteOnly ? { isFavorite: true } : undefined,
-      orderBy: [{ isFavorite: 'desc' }, { useCount: 'desc' }, { lastUsedAt: 'desc' }],
-    });
+    const whereClause = favoriteOnly ? 'WHERE "isFavorite" = true' : '';
+    const routes = await db.$queryRawUnsafe(`
+      SELECT * FROM "routes"
+      ${whereClause}
+      ORDER BY "isFavorite" DESC, "useCount" DESC, "lastUsedAt" DESC
+    `) as any[];
 
     return NextResponse.json({ routes });
   } catch (error) {

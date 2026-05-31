@@ -9,29 +9,31 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    const existing = await db.route.findUnique({ where: { id } });
-    if (!existing) {
+    // Check if route exists
+    const existing = await db.$queryRawUnsafe(`SELECT id FROM "routes" WHERE "id" = '${id}'`) as any[];
+    if (!existing || existing.length === 0) {
       return NextResponse.json({ error: 'ไม่พบเส้นทาง' }, { status: 404 });
     }
 
-    const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    const setClauses: string[] = ['"updatedAt" = CURRENT_TIMESTAMP'];
 
     if (body.isFavorite !== undefined) {
-      updateData.isFavorite = body.isFavorite;
+      setClauses.push(`"isFavorite" = ${body.isFavorite ? 'true' : 'false'}`);
     }
     if (body.originName !== undefined) {
-      updateData.originName = body.originName;
+      setClauses.push(`"originName" = '${body.originName.replace(/'/g, "''")}'`);
     }
     if (body.destinationName !== undefined) {
-      updateData.destinationName = body.destinationName;
+      setClauses.push(`"destinationName" = '${body.destinationName.replace(/'/g, "''")}'`);
     }
 
-    const updated = await db.route.update({
-      where: { id },
-      data: updateData,
-    });
+    await db.$executeRawUnsafe(`
+      UPDATE "routes" SET ${setClauses.join(', ')} WHERE "id" = '${id}'
+    `);
 
-    return NextResponse.json({ route: updated });
+    const updated = await db.$queryRawUnsafe(`SELECT * FROM "routes" WHERE "id" = '${id}'`) as any[];
+
+    return NextResponse.json({ route: updated?.[0] || null });
   } catch (error) {
     console.error('[API /routes/[id] PATCH] Error:', error);
     return NextResponse.json(
@@ -61,12 +63,12 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const existing = await db.route.findUnique({ where: { id } });
-    if (!existing) {
+    const existing = await db.$queryRawUnsafe(`SELECT id FROM "routes" WHERE "id" = '${id}'`) as any[];
+    if (!existing || existing.length === 0) {
       return NextResponse.json({ error: 'ไม่พบเส้นทาง' }, { status: 404 });
     }
 
-    await db.route.delete({ where: { id } });
+    await db.$executeRawUnsafe(`DELETE FROM "routes" WHERE "id" = '${id}'`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -15,40 +15,29 @@ export async function GET(request: NextRequest) {
 
   try {
     // 1. Check DB first for an exact name match to avoid redundant API calls
-    const existingRoutes = await db.route.findMany({
-      where: {
-        originName: originText.trim(),
-        destinationName: destinationText.trim(),
-      },
-      orderBy: { lastUsedAt: 'desc' },
-      take: 1,
-    });
+    const existing = await db.$queryRawUnsafe(`
+      SELECT * FROM "routes"
+      WHERE "originName" = '${originText.trim().replace(/'/g, "''")}'
+        AND "destinationName" = '${destinationText.trim().replace(/'/g, "''")}'
+      ORDER BY "lastUsedAt" DESC
+      LIMIT 1
+    `) as any[];
 
-    if (existingRoutes.length > 0) {
-      const existing = existingRoutes[0];
+    if (existing && existing.length > 0) {
+      const e = existing[0];
       // Update useCount and lastUsedAt
-      await db.route.update({
-        where: { id: existing.id },
-        data: {
-          useCount: existing.useCount + 1,
-          lastUsedAt: new Date(),
-        },
-      });
+      await db.$executeRawUnsafe(`
+        UPDATE "routes"
+        SET "useCount" = ${e.useCount + 1}, "lastUsedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = '${e.id}'
+      `);
 
       return NextResponse.json({
-        origin: {
-          name: existing.originName,
-          lat: existing.originLat,
-          lng: existing.originLng,
-        },
-        destination: {
-          name: existing.destinationName,
-          lat: existing.destinationLat,
-          lng: existing.destinationLng,
-        },
-        distanceKm: existing.distance,
-        durationMinutes: existing.duration,
-        routeId: existing.id,
+        origin: { name: e.originName, lat: e.originLat, lng: e.originLng },
+        destination: { name: e.destinationName, lat: e.destinationLat, lng: e.destinationLng },
+        distanceKm: e.distance,
+        durationMinutes: e.duration,
+        routeId: e.id,
         cached: true,
       });
     }
@@ -89,37 +78,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 4. Auto-save to DB
-    const savedRoute = await db.route.create({
-      data: {
-        originName: origin.name,
-        originLat: origin.lat,
-        originLng: origin.lng,
-        destinationName: destination.name,
-        destinationLat: destination.lat,
-        destinationLng: destination.lng,
-        distance: routeResult.distanceKm,
-        duration: routeResult.durationMinutes,
-        useCount: 1,
-        lastUsedAt: new Date(),
-      },
-    });
+    // 4. Auto-save to DB using raw SQL
+    const routeId = `r_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    await db.$executeRawUnsafe(`
+      INSERT INTO "routes" ("id", "originName", "originLat", "originLng",
+        "destinationName", "destinationLat", "destinationLng",
+        "distance", "duration", "useCount", "lastUsedAt", "createdAt", "updatedAt")
+      VALUES ('${routeId}',
+        '${origin.name.replace(/'/g, "''")}', ${origin.lat}, ${origin.lng},
+        '${destination.name.replace(/'/g, "''")}', ${destination.lat}, ${destination.lng},
+        ${routeResult.distanceKm}, ${routeResult.durationMinutes},
+        1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
 
     return NextResponse.json({
-      origin: {
-        name: origin.name,
-        lat: origin.lat,
-        lng: origin.lng,
-      },
-      destination: {
-        name: destination.name,
-        lat: destination.lat,
-        lng: destination.lng,
-      },
+      origin: { name: origin.name, lat: origin.lat, lng: origin.lng },
+      destination: { name: destination.name, lat: destination.lat, lng: destination.lng },
       distanceKm: routeResult.distanceKm,
       durationMinutes: routeResult.durationMinutes,
       bbox: routeResult.bbox,
-      routeId: savedRoute.id,
+      routeId,
       cached: false,
     });
   } catch (error) {
