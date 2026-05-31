@@ -49,3 +49,29 @@ Stage Summary:
 - Fix: Use @prisma/adapter-pg with pg Pool to connect to Vercel Postgres
 - Schema fully updated with all 6 models: Setting, Route, Quotation, QuotationTrip, QuotationItem, QuotationStatus enum
 - Build passes locally, pushed for Vercel deployment
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix Vercel build error (ESLint) + oil price date display (พ.ศ.) + verify reset button
+
+Work Log:
+- Investigated Vercel build failure: ESLint error `@typescript-eslint/no-require-imports` in src/lib/db.ts lines 25-26
+- Found previous subagent had already pushed commits (c4fcb69, 7d5d2c1) with:
+  1. Oil price date fix (cron always saves today's date in Bangkok timezone)
+  2. Reset all button (both CBM and Price tabs)
+  3. getDb() lazy init pattern in db.ts
+- BUT the subagent used `require()` for dynamic imports which ESLint rejected, blocking deployment
+- Fixed db.ts: Replaced `require('@prisma/adapter-pg')` and `require('pg')` with proper ES module imports (`import pg from 'pg'`, `import { PrismaPg } from '@prisma/adapter-pg'`)
+- Kept the getDb() lazy initialization pattern for build-time safety
+- Changed page.tsx: Use `formatThaiDate` (Buddhist era / พ.ศ. / 2569) instead of `formatDisplayDate` (Christian era / ค.ศ. / 2026) for oil price dates — Thai users expect Buddhist years
+- Applied same change to delete confirmation dialog
+- Verified ESLint passes cleanly for all src/ files
+- Committed and pushed: 66cb48a
+
+Stage Summary:
+- Build error fixed: Replaced require() with ES module imports in db.ts
+- Oil price date now shows พ.ศ. (Buddhist era) format (e.g. 31/05/2569 instead of 31/05/2026)
+- Cron fix ensures date always shows today (Bangkok timezone) instead of Bangchak's stale effective date
+- Reset all button already added by previous subagent (resets all tabs)
+- Push triggered for Vercel deployment
