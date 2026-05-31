@@ -17,4 +17,7 @@ export default defineConfig({
       return env('DATABASE_URL') || process.env.POSTGRES_URL || '';
     },
   },
+  datasource: {
+    url: env('DATABASE_URL') || process.env.POSTGRES_URL || '',
+  },
 });
