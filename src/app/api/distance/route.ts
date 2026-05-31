@@ -6,9 +6,12 @@ import { db } from '@/lib/db';
  * GET /api/distance?origin=...&destination=...
  *
  * Look up distance between two locations.
- * - Checks DB cache first (by exact origin/destination name match)
- * - Falls back to OpenRouteService geocode + routing API
- * - Auto-saves new routes to DB for future caching
+ * Caching strategy:
+ *   1. Check DB by raw search text (exact match) — zero API calls
+ *   2. Geocode both places
+ *   3. Check DB by geocoded names (exact match) — saves routing call
+ *   4. Call ORS routing API — full lookup
+ *   5. Auto-save route to DB
  */
 export async function GET(request: NextRequest) {
   const originText = request.nextUrl.searchParams.get('origin');
@@ -21,20 +24,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const originTrimmed = originText.trim();
+  const destTrimmed = destinationText.trim();
+
   try {
-    // 1. Check DB first for an exact name match to avoid redundant API calls
-    const existingRoutes = await db.route.findMany({
+    // 1. Check DB by raw search text (zero API calls)
+    const bySearchText = await db.route.findMany({
       where: {
-        originName: originText.trim(),
-        destinationName: destinationText.trim(),
+        originName: originTrimmed,
+        destinationName: destTrimmed,
       },
       orderBy: { lastUsedAt: 'desc' },
       take: 1,
     });
 
-    if (existingRoutes.length > 0) {
-      const existing = existingRoutes[0];
-      // Update useCount and lastUsedAt
+    if (bySearchText.length > 0) {
+      const existing = bySearchText[0];
       await db.route.update({
         where: { id: existing.id },
         data: {
@@ -63,8 +68,8 @@ export async function GET(request: NextRequest) {
 
     // 2. Geocode both places
     const [originResults, destinationResults] = await Promise.all([
-      geocode(originText.trim()),
-      geocode(destinationText.trim()),
+      geocode(originTrimmed),
+      geocode(destTrimmed),
     ]);
 
     if (originResults.length === 0) {
@@ -84,7 +89,56 @@ export async function GET(request: NextRequest) {
     const origin = originResults[0];
     const destination = destinationResults[0];
 
-    // 3. Get route from ORS
+    // 3. Check DB by geocoded names (saves routing API call)
+    const byGeocodedName = await db.route.findMany({
+      where: {
+        originName: origin.name,
+        destinationName: destination.name,
+      },
+      orderBy: { lastUsedAt: 'desc' },
+      take: 1,
+    });
+
+    if (byGeocodedName.length > 0) {
+      const existing = byGeocodedName[0];
+
+      // Also save the search text as an alias for future lookups
+      // by creating a new entry with the search text as the name
+      const aliasRoute = await db.route.create({
+        data: {
+          originName: originTrimmed,
+          originLat: origin.lat,
+          originLng: origin.lng,
+          destinationName: destTrimmed,
+          destinationLat: destination.lat,
+          destinationLng: destination.lng,
+          distance: existing.distance,
+          duration: existing.duration,
+          useCount: 1,
+          lastUsedAt: new Date(),
+        },
+      });
+
+      // Update the original route's use count
+      await db.route.update({
+        where: { id: existing.id },
+        data: {
+          useCount: { increment: 1 },
+          lastUsedAt: new Date(),
+        },
+      });
+
+      return NextResponse.json({
+        origin: { name: origin.name, lat: origin.lat, lng: origin.lng },
+        destination: { name: destination.name, lat: destination.lat, lng: destination.lng },
+        distanceKm: existing.distance,
+        durationMinutes: existing.duration,
+        routeId: aliasRoute.id,
+        cached: true,
+      });
+    }
+
+    // 4. Call ORS routing API (full lookup)
     const routeResult = await getRoute(
       { lat: origin.lat, lng: origin.lng },
       { lat: destination.lat, lng: destination.lng }
@@ -97,7 +151,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 4. Auto-save to DB
+    // 5. Auto-save to DB
     const savedRoute = await db.route.create({
       data: {
         originName: origin.name,
