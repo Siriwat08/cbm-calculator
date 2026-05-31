@@ -53,7 +53,7 @@ export async function geocode(query: string): Promise<GeocodeResult[]> {
     }
 
     return features
-      .filter((f: { geometry?: { coordinates?: number[] } }) => f.geometry?.coordinates?.length >= 2)
+      .filter((f: { geometry?: { coordinates?: number[] } }) => (f.geometry?.coordinates?.length ?? 0) >= 2)
       .map((f: { properties?: { label?: string }; geometry: { coordinates: number[] } }) => ({
         name: f.properties?.label || 'Unknown',
         lng: f.geometry.coordinates[0],
