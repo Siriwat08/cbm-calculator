@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { geocode, getRoute } from '@/lib/ors-api';
 import { db } from '@/lib/db';
 
+/**
+ * GET /api/distance?origin=...&destination=...
+ *
+ * Look up distance between two locations.
+ * - Checks DB cache first (by exact origin/destination name match)
+ * - Falls back to OpenRouteService geocode + routing API
+ * - Auto-saves new routes to DB for future caching
+ */
 export async function GET(request: NextRequest) {
   const originText = request.nextUrl.searchParams.get('origin');
   const destinationText = request.nextUrl.searchParams.get('destination');
@@ -15,29 +23,40 @@ export async function GET(request: NextRequest) {
 
   try {
     // 1. Check DB first for an exact name match to avoid redundant API calls
-    const existing = await db.$queryRawUnsafe(`
-      SELECT * FROM "routes"
-      WHERE "originName" = '${originText.trim().replace(/'/g, "''")}'
-        AND "destinationName" = '${destinationText.trim().replace(/'/g, "''")}'
-      ORDER BY "lastUsedAt" DESC
-      LIMIT 1
-    `) as any[];
+    const existingRoutes = await db.route.findMany({
+      where: {
+        originName: originText.trim(),
+        destinationName: destinationText.trim(),
+      },
+      orderBy: { lastUsedAt: 'desc' },
+      take: 1,
+    });
 
-    if (existing && existing.length > 0) {
-      const e = existing[0];
+    if (existingRoutes.length > 0) {
+      const existing = existingRoutes[0];
       // Update useCount and lastUsedAt
-      await db.$executeRawUnsafe(`
-        UPDATE "routes"
-        SET "useCount" = ${e.useCount + 1}, "lastUsedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP
-        WHERE "id" = '${e.id}'
-      `);
+      await db.route.update({
+        where: { id: existing.id },
+        data: {
+          useCount: { increment: 1 },
+          lastUsedAt: new Date(),
+        },
+      });
 
       return NextResponse.json({
-        origin: { name: e.originName, lat: e.originLat, lng: e.originLng },
-        destination: { name: e.destinationName, lat: e.destinationLat, lng: e.destinationLng },
-        distanceKm: e.distance,
-        durationMinutes: e.duration,
-        routeId: e.id,
+        origin: {
+          name: existing.originName,
+          lat: existing.originLat,
+          lng: existing.originLng,
+        },
+        destination: {
+          name: existing.destinationName,
+          lat: existing.destinationLat,
+          lng: existing.destinationLng,
+        },
+        distanceKm: existing.distance,
+        durationMinutes: existing.duration,
+        routeId: existing.id,
         cached: true,
       });
     }
@@ -78,18 +97,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 4. Auto-save to DB using raw SQL
-    const routeId = `r_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    await db.$executeRawUnsafe(`
-      INSERT INTO "routes" ("id", "originName", "originLat", "originLng",
-        "destinationName", "destinationLat", "destinationLng",
-        "distance", "duration", "useCount", "lastUsedAt", "createdAt", "updatedAt")
-      VALUES ('${routeId}',
-        '${origin.name.replace(/'/g, "''")}', ${origin.lat}, ${origin.lng},
-        '${destination.name.replace(/'/g, "''")}', ${destination.lat}, ${destination.lng},
-        ${routeResult.distanceKm}, ${routeResult.durationMinutes},
-        1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `);
+    // 4. Auto-save to DB
+    const savedRoute = await db.route.create({
+      data: {
+        originName: origin.name,
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destinationName: destination.name,
+        destinationLat: destination.lat,
+        destinationLng: destination.lng,
+        distance: routeResult.distanceKm,
+        duration: routeResult.durationMinutes,
+        useCount: 1,
+        lastUsedAt: new Date(),
+      },
+    });
 
     return NextResponse.json({
       origin: { name: origin.name, lat: origin.lat, lng: origin.lng },
@@ -97,14 +119,13 @@ export async function GET(request: NextRequest) {
       distanceKm: routeResult.distanceKm,
       durationMinutes: routeResult.durationMinutes,
       bbox: routeResult.bbox,
-      routeId,
+      routeId: savedRoute.id,
       cached: false,
     });
   } catch (error) {
     console.error('[API /distance] Error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการค้นหาระยะทาง', detail: message },
+      { error: 'เกิดข้อผิดพลาดในการค้นหาระยะทาง' },
       { status: 500 }
     );
   }

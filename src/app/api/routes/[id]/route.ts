@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+/**
+ * PATCH /api/routes/[id]
+ *
+ * Update a saved route (toggle favorite, rename origin/destination).
+ */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -9,31 +14,29 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    // Check if route exists
-    const existing = await db.$queryRawUnsafe(`SELECT id FROM "routes" WHERE "id" = '${id}'`) as any[];
-    if (!existing || existing.length === 0) {
+    const existing = await db.route.findUnique({ where: { id } });
+    if (!existing) {
       return NextResponse.json({ error: 'ไม่พบเส้นทาง' }, { status: 404 });
     }
 
-    const setClauses: string[] = ['"updatedAt" = CURRENT_TIMESTAMP'];
+    const updateData: Record<string, unknown> = {};
 
     if (body.isFavorite !== undefined) {
-      setClauses.push(`"isFavorite" = ${body.isFavorite ? 'true' : 'false'}`);
+      updateData.isFavorite = body.isFavorite;
     }
     if (body.originName !== undefined) {
-      setClauses.push(`"originName" = '${body.originName.replace(/'/g, "''")}'`);
+      updateData.originName = body.originName;
     }
     if (body.destinationName !== undefined) {
-      setClauses.push(`"destinationName" = '${body.destinationName.replace(/'/g, "''")}'`);
+      updateData.destinationName = body.destinationName;
     }
 
-    await db.$executeRawUnsafe(`
-      UPDATE "routes" SET ${setClauses.join(', ')} WHERE "id" = '${id}'
-    `);
+    const updated = await db.route.update({
+      where: { id },
+      data: updateData,
+    });
 
-    const updated = await db.$queryRawUnsafe(`SELECT * FROM "routes" WHERE "id" = '${id}'`) as any[];
-
-    return NextResponse.json({ route: updated?.[0] || null });
+    return NextResponse.json({ route: updated });
   } catch (error) {
     console.error('[API /routes/[id] PATCH] Error:', error);
     return NextResponse.json(
@@ -43,6 +46,11 @@ export async function PATCH(
   }
 }
 
+/**
+ * DELETE /api/routes/[id]
+ *
+ * Delete a saved route. Requires admin API key.
+ */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -63,12 +71,12 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const existing = await db.$queryRawUnsafe(`SELECT id FROM "routes" WHERE "id" = '${id}'`) as any[];
-    if (!existing || existing.length === 0) {
+    const existing = await db.route.findUnique({ where: { id } });
+    if (!existing) {
       return NextResponse.json({ error: 'ไม่พบเส้นทาง' }, { status: 404 });
     }
 
-    await db.$executeRawUnsafe(`DELETE FROM "routes" WHERE "id" = '${id}'`);
+    await db.route.delete({ where: { id } });
 
     return NextResponse.json({ success: true });
   } catch (error) {
