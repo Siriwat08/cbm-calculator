@@ -1,35 +1,141 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// ============================================================
+// Prisma Schema — CBM Calculator for หจก.เผ่าปัญญา ทรานสปอร์ต
+// ============================================================
+// Database: Vercel Postgres (PostgreSQL)
+// Prisma Version: 7.x
+//
+// NOTE: In Prisma 7, database URLs are configured in prisma.config.ts
+// (not in this schema file). See prisma.config.ts for connection setup.
+//
+// Features covered:
+//   - Feature 1: Quotation Generator (Quotation, QuotationTrip, QuotationItem)
+//   - Feature 2: Multi-Trip Calculator (uses QuotationTrip for multi-truck)
+//   - Feature 3: Auto Distance Lookup (Route model)
+//   - General: Settings (key-value store for PromptPay, company info, etc.)
+// ============================================================
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ============================================================
+// Feature 1 & 2: Quotation Generator + Multi-Trip Calculator
+// ============================================================
+
+model Quotation {
+  id              String   @id @default(cuid())
+  quotationNumber String   @unique
+  status          QuotationStatus @default(DRAFT)
+
+  customerName    String
+  customerPhone   String?
+  customerAddress String?
+
+  origin          String
+  destination     String
+
+  totalPrice      Float    @default(0)
+  currency        String   @default("THB")
+
+  expiryDays      Int      @default(7)
+  expiryDate      DateTime
+
+  promptPayId     String?
+  notes           String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  trips           QuotationTrip[]
+
+  @@index([quotationNumber])
+  @@index([status])
+  @@index([createdAt])
+  @@map("quotations")
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model QuotationTrip {
+  id             String   @id @default(cuid())
+  quotationId    String
+  tripIndex      Int      @default(0)
+
+  truckTypeId    String
+  truckName      String
+  truckCBM       Float
+  truckMaxWeight Float
+
+  origin         String?
+  destination    String?
+  distance       Float    @default(0)
+
+  dieselPrice    Float    @default(0)
+  fuelCost       Float    @default(0)
+  laborCost      Float    @default(0)
+  basePrice      Float    @default(0)
+  tripTotalPrice Float    @default(0)
+
+  utilizedCBM    Float    @default(0)
+  utilizationPct Float    @default(0)
+  totalWeight    Float    @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  quotation      Quotation      @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  items          QuotationItem[]
+
+  @@index([quotationId])
+  @@map("quotation_trips")
 }
+
+model QuotationItem {
+  id          String   @id @default(cuid())
+  tripId      String
+  itemIndex   Int      @default(0)
+
+  name        String?
+  width       Float
+  length      Float
+  height      Float
+  quantity    Int      @default(1)
+  weight      Float
+
+  posX        Float?
+  posY        Float?
+  posZ        Float?
+  rotatedW    Float?
+  rotatedL    Float?
+  rotatedH    Float?
+  fits        Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+
+  trip        QuotationTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@map("quotation_items")
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+// ============================================================
+// Feature 3: Auto Distance Lookup — Saved Routes
+// ============================================================
 
 model Route {
-  id              String    @id @default(cuid())
+  id              String   @id @default(cuid())
   originName      String
   originLat       Float?
   originLng       Float?
@@ -38,9 +144,30 @@ model Route {
   destinationLng  Float?
   distance        Float
   duration        Float?
-  useCount        Int       @default(0)
-  isFavorite      Boolean   @default(false)
+  useCount        Int      @default(0)
+  isFavorite      Boolean  @default(false)
+
   lastUsedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([originName, destinationName])
+  @@index([isFavorite])
+  @@index([useCount])
+  @@map("routes")
+}
+
+// ============================================================
+// General: Key-Value Settings Store
+// ============================================================
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
 }
