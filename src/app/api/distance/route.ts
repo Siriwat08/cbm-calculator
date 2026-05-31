@@ -102,8 +102,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('[API /distance] Error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการค้นหาระยะทาง' },
+      { error: 'เกิดข้อผิดพลาดในการค้นหาระยะทาง', detail: message },
       { status: 500 }
     );
   }
