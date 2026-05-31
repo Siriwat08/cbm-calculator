@@ -498,12 +498,33 @@ export default function Home() {
                           <p className="text-emerald-600 text-sm mt-1">ใช้พื้นที่ {binPackingResult.utilizationPercent.toFixed(1)}% | น้ำหนัก {((totalWeight / selectedTruck.maxWeight) * 100).toFixed(1)}%</p>
                         </div>
                       )}
-                      {binPackingResult.unfittedItems.length > 0 && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                          <p className="text-red-800 font-medium">❌ มีสินค้าวางในรถไม่ได้</p>
-                          <ul className="text-sm text-red-600 mt-1 space-y-1">{binPackingResult.unfittedItems.map((item, idx) => <li key={idx}>• {item.reason}</li>)}</ul>
-                        </div>
-                      )}
+                      {binPackingResult.unfittedItems.length > 0 && (() => {
+                        // Group unfitted items by cargoIndex to show compact summary
+                        const grouped = new Map<number, number>();
+                        binPackingResult.unfittedItems.forEach((item) => {
+                          grouped.set(item.cargoIndex, (grouped.get(item.cargoIndex) || 0) + 1);
+                        });
+                        return (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-red-800 font-medium">❌ มีสินค้าวางในรถไม่ได้ ({binPackingResult.unfittedItems.length} ชิ้น)</p>
+                            <div className="text-sm text-red-600 mt-1 space-y-1">
+                              {Array.from(grouped.entries()).map(([cargoIdx, count]) => {
+                                const cargo = cargoItems[cargoIdx];
+                                if (!cargo) return null;
+                                const totalForItem = cargo.quantity;
+                                return (
+                                  <div key={cargoIdx} className="flex items-center gap-2">
+                                    <span>• {cargo.width}×{cargo.length}×{cargo.height} ซม.</span>
+                                    <span className="bg-red-100 px-2 py-0.5 rounded text-xs font-medium">
+                                      ×{count}{totalForItem > 1 && count < totalForItem ? `/${totalForItem}` : ''} ชิ้น
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {totalWeight > selectedTruck.maxWeight && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                           <p className="text-red-800 font-medium">❌ น้ำหนักรวมเกินความจุรถ</p>
@@ -513,9 +534,10 @@ export default function Home() {
                     </>
                   )}
                   {recommendedTruck && recommendedTruck.id !== selectedTruck.id && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <button onClick={() => setSelectedTruck(recommendedTruck)} className="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 text-left hover:bg-blue-100 transition-colors cursor-pointer">
                       <p className="text-blue-800 font-medium">💡 แนะนำ: {recommendedTruck.name} (CBM: {recommendedTruck.cbm}, น้ำหนัก: {recommendedTruck.maxWeight.toLocaleString()} kg)</p>
-                    </div>
+                      <p className="text-blue-500 text-xs mt-1">👆 กดเพื่อเลือกรถคันนี้</p>
+                    </button>
                   )}
                   <button onClick={() => goToPriceCalculator(selectedTruck)} className="w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg font-bold hover:from-emerald-600 hover:to-emerald-700 transition">
                     💰 ไปคำนวณราคาค่าขนส่ง ({selectedTruck.name})

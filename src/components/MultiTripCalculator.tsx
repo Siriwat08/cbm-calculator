@@ -138,17 +138,17 @@ export default function MultiTripCalculator({
       <section className="bg-white rounded-xl shadow-lg overflow-hidden">
         <div className="bg-gradient-to-r from-slate-700 to-slate-800 text-white px-6 py-4">
           <h2 className="text-lg font-bold">📊 เปรียบเทียบราคาทุกประเภทรถ</h2>
-          <p className="text-slate-300 text-sm">คลิกที่แถวเพื่อดูรายละเอียดแต่ละเที่ยว</p>
+          <p className="text-slate-300 text-sm">คลิกที่แถวเพื่อดูรายละเอียด | 1 รอบ = ขนส่งได้ครบใน 1 คัน</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b">
                 <th className="text-left py-3 px-4 text-gray-600 font-medium text-sm">ประเภทรถ</th>
-                <th className="text-center py-3 px-4 text-gray-600 font-medium text-sm">จำนวนเที่ยว</th>
+                <th className="text-center py-3 px-4 text-gray-600 font-medium text-sm">จำนวนรถ</th>
                 <th className="text-center py-3 px-4 text-gray-600 font-medium text-sm">CBM รวม</th>
                 <th className="text-center py-3 px-4 text-gray-600 font-medium text-sm">น้ำหนักรวม</th>
-                <th className="text-right py-3 px-4 text-gray-600 font-medium text-sm">ราคา/เที่ยว</th>
+                <th className="text-right py-3 px-4 text-gray-600 font-medium text-sm">ราคา/คัน</th>
                 <th className="text-right py-3 px-4 text-gray-600 font-medium text-sm">ราคารวม</th>
                 <th className="text-center py-3 px-4 text-gray-600 font-medium text-sm">แนะนำ</th>
               </tr>
@@ -185,9 +185,16 @@ export default function MultiTripCalculator({
                     </td>
                     <td className="py-3 px-4 text-center">
                       {result.feasible ? (
-                        <span className="font-bold text-gray-800">
-                          {result.totalTrips} เที่ยว
-                        </span>
+                        <div>
+                          <span className="font-bold text-gray-800">
+                            {result.totalTrips} คัน
+                          </span>
+                          {result.oneRound && (
+                            <span className="ml-1 bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                              1 รอบ
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-red-600 font-bold">
                           ไม่พอ
@@ -215,9 +222,22 @@ export default function MultiTripCalculator({
                       )}
                     </td>
                     <td className="py-3 px-4 text-center">
+                      {result.bestOneRound && !result.bestValue && result.feasible && (
+                        <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full font-bold">
+                          🎯 1 รอบ
+                        </span>
+                      )}
                       {result.bestValue && result.feasible && (
                         <span className="bg-emerald-600 text-white text-xs px-2 py-1 rounded-full font-bold">
-                          แนะนำ
+                          ⭐ แนะนำ
+                        </span>
+                      )}
+                      {result.bestValue && result.bestOneRound && result.feasible && (
+                        <div className="text-[10px] text-emerald-500 mt-0.5">ราคาดี + 1 รอบ</div>
+                      )}
+                      {!result.bestValue && result.oneRound && result.feasible && !result.bestOneRound && (
+                        <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-1 rounded-full font-medium">
+                          1 รอบ
                         </span>
                       )}
                       {!result.feasible && (
@@ -265,7 +285,7 @@ export default function MultiTripCalculator({
                   >
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="font-bold text-gray-800">
-                        เที่ยวที่ {trip.tripIndex}
+                        คันที่ {trip.tripIndex}
                       </h4>
                       <span className="text-sm font-bold text-violet-600">
                         {trip.pricePerTrip !== null
@@ -365,7 +385,7 @@ export default function MultiTripCalculator({
                     {/* Items list for this trip */}
                     <div className="bg-white rounded-lg p-2 border">
                       <p className="text-xs font-medium text-gray-600 mb-1">
-                        รายการสินค้าในเที่ยวนี้:
+                        รายการสินค้าในรถคันนี้:
                       </p>
                       <div className="space-y-1">
                         {trip.items.map((item, idx) => (
@@ -400,8 +420,8 @@ export default function MultiTripCalculator({
                     {trip.binPackingResult.unfittedItems.length > 0 && (
                       <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-2">
                         <p className="text-xs text-red-700 font-medium">
-                          วางไม่ได้ในเที่ยวนี้: {trip.binPackingResult.unfittedItems.length} ชิ้น
-                          (จะไปเที่ยวถัดไป)
+                          วางไม่ได้ในรถคันนี้: {trip.binPackingResult.unfittedItems.length} ชิ้น
+                          (จะไปคันถัดไป)
                         </p>
                       </div>
                     )}
@@ -417,7 +437,7 @@ export default function MultiTripCalculator({
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="font-bold text-gray-800">
-                        รวม {result.totalTrips} เที่ยว — {result.truckType.name}
+                        รวม {result.totalTrips} คัน — {result.truckType.name}
                       </p>
                       <p className="text-xs text-gray-500">
                         CBM: {result.totalCBM.toFixed(2)} m³ | น้ำหนัก: {result.totalWeight.toLocaleString()} kg
@@ -452,8 +472,8 @@ export default function MultiTripCalculator({
                   .filter((r) => !r.feasible)
                   .map((r) => (
                     <li key={r.truckType.id}>
-                      • {r.truckType.name} — ไม่สามารถบรรทุกสินค้าได้ครบภายใน {MAX_TRIPS_DISPLAY} เที่ยว
-                      {r.trips.length > 0 && ` (ขนส่งได้ ${r.trips.length} เที่ยว แต่ยังเหลือสินค้า)`}
+                      • {r.truckType.name} — ไม่สามารถบรรทุกสินค้าได้ครบภายใน {MAX_TRIPS_DISPLAY} คัน
+                      {r.trips.length > 0 && ` (ขนส่งได้ ${r.trips.length} คัน แต่ยังเหลือสินค้า)`}
                     </li>
                   ))}
               </ul>

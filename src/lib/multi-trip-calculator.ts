@@ -38,6 +38,8 @@ export interface MultiTripResult {
   totalWeight: number;
   feasible: boolean;
   bestValue: boolean;
+  oneRound: boolean; // can fit all items in a single trip
+  bestOneRound: boolean; // cheapest among one-round options
 }
 
 // ===== Helper: Calculate price from rate data =====
@@ -217,6 +219,11 @@ export function calculateMultiTrip(
     });
   }
 
+  // Mark oneRound flag
+  for (const result of results) {
+    result.oneRound = result.feasible && result.totalTrips === 1;
+  }
+
   // Determine best value: lowest total price among feasible options
   const feasibleResults = results.filter((r) => r.feasible);
   if (feasibleResults.length > 0) {
@@ -225,6 +232,17 @@ export function calculateMultiTrip(
     for (const result of results) {
       if (result.feasible && result.totalPrice === minPrice) {
         result.bestValue = true;
+      }
+    }
+  }
+
+  // Determine best one-round: cheapest among trucks that can do it in 1 trip
+  const oneRoundResults = results.filter((r) => r.oneRound);
+  if (oneRoundResults.length > 0) {
+    const minOneRoundPrice = Math.min(...oneRoundResults.map((r) => r.totalPrice));
+    for (const result of results) {
+      if (result.oneRound && result.totalPrice === minOneRoundPrice) {
+        result.bestOneRound = true;
       }
     }
   }
