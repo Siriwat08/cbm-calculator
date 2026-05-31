@@ -75,3 +75,57 @@ Stage Summary:
 - Cron fix ensures date always shows today (Bangkok timezone) instead of Bangchak's stale effective date
 - Reset all button already added by previous subagent (resets all tabs)
 - Push triggered for Vercel deployment
+
+---
+Task ID: quotation-feature-1
+Agent: full-stack-developer
+Task: Build Quotation Generator UI + PDF Preview
+
+Work Log:
+- Explored existing project structure — found quotation components already partially implemented
+- Improved QuotationPreview.tsx with production-ready A4 preview:
+  - Gray background wrapper with scrollable white A4 page centered on screen
+  - Professional typography using Sarabun/Segoe UI font stack
+  - Refined header with company info, border-bottom separator
+  - Info grid layout: customer info left, route right
+  - Trips table showing items within each trip (dashed separator)
+  - Thai Buddhist era dates using formatThaiDate/formatThaiDateLong
+  - 4 conditions in terms section (VAT not included, diesel price change, expiry days, acceptance)
+  - Signature lines for ผู้เสนอราคา and ผู้สั่งซื้อ
+  - Enhanced @media print styles to hide buttons, proper margins
+  - Yellow-accented notes section with left border
+- Improved QuotationForm.tsx:
+  - Added QuotationItem interface with name, width, length, height, quantity, weight
+  - Items array within each QuotationTrip, populated from CBM calculator cargoItems
+  - Textarea for notes instead of input
+  - Route pre-fill from DistanceLookup via originName/destinationName props
+  - Items summary display within each trip card
+  - Items passed to API on submit
+- Improved QuotationList.tsx:
+  - Dialog component (shadcn/ui) for viewing quotations instead of page navigation
+  - Status dropdown menu for changing quotation status (DRAFT→SENT→ACCEPTED→REJECTED→EXPIRED→CANCELLED)
+  - Color-coded status badges with border
+  - Copy share link button
+  - Delete button with confirmation
+  - Scrollable table with sticky header
+- Created /quotation/[id]/page.tsx — dynamic route for public share page:
+  - Fetches quotation by ID or quotationNumber
+  - Shows status badge at top
+  - Print button
+  - Loading state and 404 handling
+  - Footer with company info
+- Modified page.tsx:
+  - Added originName and destinationName state variables
+  - Updated handleApplyDistance to save origin/destination names
+  - Passed originName and destinationName to QuotationForm
+  - Quotation tab already existed, verified integration is correct
+- TypeScript check passes for all quotation files
+- ESLint warnings are only about react-hooks/set-state-in-effect (standard React patterns)
+
+Stage Summary:
+- QuotationPreview: Professional A4 print-optimized layout with gray background, items in trips, Thai Buddhist dates
+- QuotationForm: Items support, textarea for notes, route pre-fill from distance lookup
+- QuotationList: Dialog viewing, status dropdown, polished table UI
+- Public share page: /quotation/[id] dynamic route with status badge and print support
+- All dates use พ.ศ. (Buddhist era) throughout
+- No PromptPay QR (as explicitly requested)

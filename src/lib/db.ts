@@ -17,26 +17,67 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /**
+ * Creates a PrismaClient-like proxy that returns rejected promises on any DB operation.
+ * This prevents the server from crashing when Prisma can't connect to the database.
+ * API routes can catch these errors gracefully and return 500 responses.
+ */
+function createNoopProxy(): PrismaClient {
+  const errorMsg = '[DB] Database not available — please check DATABASE_URL configuration'
+  
+  const handler: ProxyHandler<object> = {
+    get(_target, prop) {
+      if (prop === '$connect' || prop === '$disconnect' || prop === '$on' || prop === '$use' || prop === '$extends') {
+        return () => Promise.resolve()
+      }
+      if (typeof prop === 'string' && !prop.startsWith('__')) {
+        // Return a nested proxy for model access (e.g., db.quotation.findFirst)
+        return new Proxy({}, {
+          get() {
+            // Return an async function that rejects, so API routes can catch it
+            return (..._args: unknown[]) => Promise.reject(new Error(errorMsg))
+          }
+        })
+      }
+      return undefined
+    }
+  }
+
+  return new Proxy({}, handler) as unknown as PrismaClient
+}
+
+/**
  * Create a PrismaClient with appropriate adapter.
  *
  * - PostgreSQL URL → uses @prisma/adapter-pg (required by Prisma 7 engine type "client")
- * - No URL → returns a bare PrismaClient (will fail at runtime if DB ops are attempted)
+ * - No URL / Non-PostgreSQL URL → returns a noop proxy that safely rejects DB operations
  */
 function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || ''
 
   if (!connectionString) {
     console.warn('[DB] No DATABASE_URL or POSTGRES_URL found — Prisma operations will fail at runtime')
-    return new PrismaClient()
+    return createNoopProxy()
   }
 
-  const pool = new pg.Pool({ connectionString })
-  const adapter = new PrismaPg(pool)
+  // Only use PostgreSQL adapter if the URL starts with postgres:// or postgresql://
+  if (connectionString.startsWith('postgres://') || connectionString.startsWith('postgresql://')) {
+    try {
+      const pool = new pg.Pool({ connectionString })
+      const adapter = new PrismaPg(pool)
 
-  return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-  })
+      return new PrismaClient({
+        adapter,
+        log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+      })
+    } catch (error) {
+      console.error('[DB] Failed to create PostgreSQL adapter:', error)
+      return createNoopProxy()
+    }
+  }
+
+  // For non-PostgreSQL URLs (e.g., SQLite file://), return a noop proxy
+  console.warn('[DB] Non-PostgreSQL connection URL detected — database operations will fail at runtime')
+  return createNoopProxy()
 }
 
 let _prisma: PrismaClient | undefined;

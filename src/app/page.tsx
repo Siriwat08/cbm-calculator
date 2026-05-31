@@ -11,10 +11,12 @@ import DistanceLookup from '@/components/DistanceLookup';
 import { useToast } from '@/hooks/use-toast';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 import MultiTripCalculator from '@/components/MultiTripCalculator';
+import QuotationForm from '@/components/quotation/QuotationForm';
+import QuotationList from '@/components/quotation/QuotationList';
 
 export default function Home() {
   // ===== Tab State =====
-  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'multitrip'>('cbm');
+  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'multitrip' | 'quotation'>('cbm');
 
   // ===== Oil Price State =====
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
@@ -32,6 +34,8 @@ export default function Home() {
   const [selectedJob, setSelectedJob] = useState<string>('4ล้อ_PPY');
   const [distance, setDistance] = useState<string>('');
   const [routeDescription, setRouteDescription] = useState<string>('');
+  const [originName, setOriginName] = useState<string>('');
+  const [destinationName, setDestinationName] = useState<string>('');
 
   // ===== Labor State =====
   const [includeLabor, setIncludeLabor] = useState(false);
@@ -294,9 +298,11 @@ export default function Home() {
   };
 
   // ===== Distance Lookup Integration =====
-  const handleApplyDistance = (distanceKm: number, originName: string, destinationName: string) => {
+  const handleApplyDistance = (distanceKm: number, origin: string, destination: string) => {
     setDistance(distanceKm.toFixed(1));
-    setRouteDescription(`${originName} → ${destinationName}`);
+    setRouteDescription(`${origin} → ${destination}`);
+    setOriginName(origin);
+    setDestinationName(destination);
     // Scroll to price calculator
     setTimeout(() => {
       distanceLookupRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -331,6 +337,9 @@ export default function Home() {
           </button>
           <button onClick={() => setActiveTab('multitrip')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'multitrip' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             🚚 Multi-Trip
+          </button>
+          <button onClick={() => setActiveTab('quotation')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'quotation' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            📄 ใบเสนอราคา
           </button>
         </div>
       </div>
@@ -821,6 +830,27 @@ export default function Home() {
               rateData={rateData}
               includeLabor={includeLabor}
             />
+          </div>
+        )}
+
+        {/* ===== Quotation Tab ===== */}
+        {activeTab === 'quotation' && (
+          <div className="space-y-6">
+            <QuotationForm
+              selectedJob={selectedJob}
+              distance={distance}
+              currentOilPrice={currentOilPrice}
+              calculatedPrice={calculatedPrice}
+              rateData={rateData}
+              availableJobs={availableJobs}
+              selectedTruck={selectedTruck}
+              cargoItems={cargoItems}
+              includeLabor={includeLabor}
+              adminApiKey={adminApiKey}
+              originName={originName}
+              destinationName={destinationName}
+            />
+            <QuotationList adminApiKey={adminApiKey} />
           </div>
         )}
       </main>
