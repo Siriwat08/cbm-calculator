@@ -11,42 +11,73 @@ import {
 } from '@/lib/oil-price-api';
 
 // ===== CRON HANDLER =====
+// This endpoint is triggered by:
+// 1. Vercel Cron (sends vercel-cron header) — daily at 05:30 Bangkok time
+// 2. Client-side auto-fetch (when today's price is missing)
+// 3. Manual trigger with API key
+//
+// GET is safe (idempotent fetch-and-save), so we allow all access.
+// No auth required — fetching oil price and saving it is not destructive.
 export async function GET(request: NextRequest) {
-  // Auth check for manual cron triggers (Vercel cron sends vercel-cron header)
+  // Log the source of the request for debugging
   const isVercelCron = request.headers.get('vercel-cron') === 'true';
-  if (!isVercelCron && !validateApiKey(request)) {
-    return NextResponse.json(
-      { error: 'ไม่มีสิทธิ์เข้าถึง — กรุณาระบุ API Key' },
-      { status: 401 }
-    );
-  }
-
+  const source = isVercelCron ? 'vercel-cron' : 'manual';
   const bangkokToday = getTodayISO();
   const utcNow = new Date().toISOString();
-  console.log(`[Cron] Started — UTC: ${utcNow}, Bangkok today: ${bangkokToday}`);
+  console.log(`[Cron] Started — Source: ${source}, UTC: ${utcNow}, Bangkok today: ${bangkokToday}`);
 
   // Clean up legacy greeting key (fire and forget)
   cleanupGreetingKey().catch(() => {});
 
   try {
+    // Try fetching from Bangchak API
     const currentPrice = await fetchFromBangchak();
 
     // Get existing history (with defensive handling)
     let history = await getOilPriceHistory();
     console.log(`[Cron] Existing history: ${history.length} entries`);
 
+    // Check if today's entry already exists
+    const todayEntry = history.find(h => h.date === bangkokToday);
+
+    if (todayEntry && !currentPrice) {
+      // Today's entry exists and Bangchak is down — nothing to do
+      console.log(`[Cron] Today's entry exists (${todayEntry.price} บาท), Bangchak unavailable — no change needed`);
+      return NextResponse.json({
+        success: true,
+        message: 'Today\'s price already saved, Bangchak unavailable',
+        date: todayEntry.date,
+        price: todayEntry.price,
+        history: history,
+        bangkokToday,
+      });
+    }
+
     if (!currentPrice) {
-      // If Bangchak API fails, try to use latest history price
+      // Bangchak API failed — create today's entry using yesterday's price (self-healing)
       if (history.length > 0) {
-        console.log('[Cron] Bangchak API failed, keeping latest history price');
-        return NextResponse.json({
-          success: true,
-          message: 'Bangchak API unavailable, kept latest stored price',
-          date: history[0].date,
-          price: history[0].price,
-          history: history,
-          bangkokToday,
-        });
+        const latestPrice = history[0].price;
+        const newEntry = { date: bangkokToday, price: latestPrice, manual: false };
+
+        // Check if today's entry already exists
+        const existingIndex = history.findIndex(h => h.date === bangkokToday);
+        if (existingIndex === -1) {
+          history = [newEntry, ...history].slice(0, MAX_HISTORY_ENTRIES);
+          console.log(`[Cron] Bangchak API failed — created today's entry using latest price: ${latestPrice} บาท`);
+        }
+
+        const saved = await setToEdgeConfig(HISTORY_KEY, history);
+        if (saved) {
+          console.log(`[Cron] ✅ Self-healed: saved today's entry (${latestPrice} บาท) from latest history`);
+          return NextResponse.json({
+            success: true,
+            message: 'Bangchak API unavailable, created today\'s entry using latest stored price',
+            date: bangkokToday,
+            price: latestPrice,
+            history: history,
+            bangkokToday,
+          });
+        }
       }
 
       return NextResponse.json({
@@ -57,14 +88,18 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Cron] Bangchak price: ${currentPrice.price} บาท — effective date: ${currentPrice.date} (Bangkok today: ${bangkokToday})`);
 
-    const existingIndex = history.findIndex(h => h.date === currentPrice.date);
+    // Use the current date from Bangchak or fall back to Bangkok today
+    const entryDate = currentPrice.date || bangkokToday;
+    const newEntry = { date: entryDate, price: currentPrice.price, manual: false };
+
+    const existingIndex = history.findIndex(h => h.date === entryDate);
 
     if (existingIndex === -1) {
-      history = [currentPrice, ...history].slice(0, MAX_HISTORY_ENTRIES);
-      console.log(`[Cron] Adding new entry for ${currentPrice.date} — total: ${history.length}`);
+      history = [newEntry, ...history].slice(0, MAX_HISTORY_ENTRIES);
+      console.log(`[Cron] Adding new entry for ${entryDate} — total: ${history.length}`);
     } else {
-      history[existingIndex] = currentPrice;
-      console.log(`[Cron] Updated existing entry for ${currentPrice.date}`);
+      history[existingIndex] = newEntry;
+      console.log(`[Cron] Updated existing entry for ${entryDate}`);
     }
 
     const saved = await setToEdgeConfig(HISTORY_KEY, history);
@@ -75,7 +110,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         message: 'Oil price saved successfully',
-        date: currentPrice.date,
+        date: entryDate,
         price: currentPrice.price,
         history: history,
         bangkokToday,

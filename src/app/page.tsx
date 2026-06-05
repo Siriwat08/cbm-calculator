@@ -12,7 +12,7 @@ import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from 
 
 export default function Home() {
   // ===== Tab State =====
-  const [activeTab, setActiveTab] = useState<'cbm' | 'price'>('cbm');
+  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'compare'>('cbm');
 
   // ===== Oil Price State =====
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
@@ -32,6 +32,9 @@ export default function Home() {
 
   // ===== Labor State =====
   const [includeLabor, setIncludeLabor] = useState(false);
+
+  // ===== Compare Tab State =====
+  const [expandedTruck, setExpandedTruck] = useState<string | null>(null);
 
   // ===== CBM Calculator State =====
   const [selectedTruck, setSelectedTruck] = useState<TruckType>(truckTypes[0]);
@@ -199,6 +202,7 @@ export default function Home() {
   }, []);
 
   // Fetch Oil Price - no synchronous setState in effect body
+  // Also auto-triggers cron if today's price is missing (self-healing)
   useEffect(() => {
     let cancelled = false;
     fetch('/api/oil-price')
@@ -206,9 +210,29 @@ export default function Home() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return;
         applyOilPriceData(data);
+
+        // Auto-trigger cron if today's price entry doesn't exist
+        // This ensures the price is always up-to-date even if Vercel Cron failed
+        const bangkokToday = data.bangkokToday;
+        const hasTodayEntry = data.history?.some((h: OilPrice) => h.date === bangkokToday);
+        if (!hasTodayEntry) {
+          console.log('[OilPrice] No entry for today, auto-triggering cron...');
+          try {
+            const cronRes = await fetch('/api/cron');
+            if (cronRes.ok) {
+              const cronData = await cronRes.json();
+              if (cronData.history) {
+                applyOilPriceData(cronData);
+                console.log('[OilPrice] Cron auto-fetch succeeded');
+              }
+            }
+          } catch (cronError) {
+            console.warn('[OilPrice] Cron auto-fetch failed:', cronError);
+          }
+        }
       })
       .catch((error) => {
         console.error('Failed to fetch oil price:', error);
@@ -252,6 +276,193 @@ export default function Home() {
   const calculateCBM = (item: CargoItem) => ((item.width * item.length * item.height) / 1000000) * item.quantity;
   const totalCBM = cargoItems.reduce((sum, item) => sum + calculateCBM(item), 0);
   const totalWeight = cargoItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+  const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
+  const hasValidationErrors = Object.keys(validationErrors).length > 0;
+
+  // ===== Compare Tab: Price Calculation Helper =====
+  function calculateTruckPrice(rateData: RateData | null, jobKey: string, oilPrice: number, dist: number): number | null {
+    if (!rateData) return null;
+    const jobData = rateData[jobKey];
+    if (!jobData) return null;
+    let oilIndex = -1;
+    for (let i = 0; i < jobData.oil_ranges.length; i++) {
+      const range = jobData.oil_ranges[i];
+      if (oilPrice >= range.min && oilPrice <= range.max) {
+        oilIndex = i;
+        break;
+      }
+    }
+    if (oilIndex === -1) oilIndex = jobData.oil_ranges.length - 1;
+    let distIndex = -1;
+    if (jobData.data && jobData.data.length > 0) {
+      for (let i = 0; i < jobData.data.length; i++) {
+        const row = jobData.data[i];
+        if (dist >= row.dist_min && dist <= row.dist_max) {
+          distIndex = i;
+          break;
+        }
+      }
+      if (distIndex === -1) {
+        if (dist < jobData.data[0].dist_min) {
+          distIndex = 0;
+        } else {
+          distIndex = jobData.data.length - 1;
+        }
+      }
+    }
+    if (distIndex >= 0 && jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
+      return jobData.data[distIndex].prices[oilIndex];
+    }
+    return null;
+  }
+
+  // ===== Compare Tab: Truck Plans Comparison =====
+  interface TruckPlan {
+    truck: TruckType;
+    truckCount: number;
+    pricePerTruck: number | null;
+    totalPrice: number | null;
+    canUse: boolean;
+    reason?: string;
+    binPackingResult: BinPackingResult | null;
+    weightUsage: number;
+    volumeUsage: number;
+  }
+
+  interface MixedTruckPlan {
+    trucks: { truck: TruckType; count: number; pricePerTruck: number | null }[];
+    totalPrice: number | null;
+    description: string;
+  }
+
+  const truckPlans = useMemo<TruckPlan[]>(() => {
+    if (!allItemsValid || totalCBM <= 0 || !distance) return [];
+    const dist = parseFloat(distance);
+    if (isNaN(dist) || dist <= 0) return [];
+
+    return truckTypes.map((truck) => {
+      // Check if any single item is too large for the truck
+      const oversizedItem = cargoItems.find(item => {
+        const w = item.width / 100;
+        const l = item.length / 100;
+        const h = item.height / 100;
+        return (
+          (w > truck.dimensions.width && l > truck.dimensions.width && h > truck.dimensions.width) ||
+          (w > truck.dimensions.length && l > truck.dimensions.length && h > truck.dimensions.length) ||
+          (w > truck.dimensions.height && l > truck.dimensions.height && h > truck.dimensions.height)
+        );
+      });
+
+      if (oversizedItem) {
+        return {
+          truck,
+          truckCount: 0,
+          pricePerTruck: null,
+          totalPrice: null,
+          canUse: false,
+          reason: 'มีสินค้าที่ใหญ่เกินขนาดรถ',
+          binPackingResult: null,
+          weightUsage: 0,
+          volumeUsage: 0,
+        };
+      }
+
+      const bpResult = performBinPacking(cargoItems, truck);
+      const pricePerTruck = calculateTruckPrice(rateData, truck.jobKey, currentOilPrice, dist);
+
+      const fitsByVolume = bpResult.canFitAll;
+      const fitsByWeight = totalWeight <= truck.maxWeight;
+
+      let truckCount = 1;
+      if (fitsByVolume && fitsByWeight) {
+        truckCount = 1;
+      } else {
+        const trucksByWeight = Math.ceil(totalWeight / truck.maxWeight);
+        const trucksByVolume = Math.ceil(totalCBM / (truck.cbm * truck.usableSpace / 100));
+        truckCount = Math.max(trucksByWeight, trucksByVolume, 1);
+      }
+
+      // Check if total weight can ever be distributed (individual item weight check already done above)
+      // Even with multiple trucks, if a single item weight exceeds maxWeight, can't use
+      const singleItemTooHeavy = cargoItems.some(item => item.weight > truck.maxWeight);
+      if (singleItemTooHeavy) {
+        return {
+          truck,
+          truckCount: 0,
+          pricePerTruck: null,
+          totalPrice: null,
+          canUse: false,
+          reason: 'มีสินค้าที่หนักเกินน้ำหนักบรรทุกรถ',
+          binPackingResult: bpResult,
+          weightUsage: (totalWeight / truck.maxWeight) * 100,
+          volumeUsage: bpResult.utilizationPercent,
+        };
+      }
+
+      const totalPrice = pricePerTruck !== null ? pricePerTruck * truckCount : null;
+      const weightUsage = (totalWeight / (truck.maxWeight * truckCount)) * 100;
+      const volumeUsage = truckCount === 1 ? bpResult.utilizationPercent : (totalCBM / (truck.cbm * truckCount)) * 100;
+
+      return {
+        truck,
+        truckCount,
+        pricePerTruck,
+        totalPrice,
+        canUse: true,
+        binPackingResult: bpResult,
+        weightUsage,
+        volumeUsage,
+      };
+    });
+  }, [cargoItems, allItemsValid, totalCBM, totalWeight, distance, rateData, currentOilPrice]);
+
+  const mixedTruckPlans = useMemo<MixedTruckPlan[]>(() => {
+    const usablePlans = truckPlans.filter(p => p.canUse && p.totalPrice !== null);
+    if (usablePlans.length < 2) return [];
+
+    const dist = parseFloat(distance);
+    if (isNaN(dist) || dist <= 0) return [];
+
+    const cheapestSingle = Math.min(...usablePlans.map(p => p.totalPrice!));
+    const results: MixedTruckPlan[] = [];
+
+    // Try all pairs of truck types
+    for (let i = 0; i < usablePlans.length; i++) {
+      for (let j = i + 1; j < usablePlans.length; j++) {
+        const planA = usablePlans[i];
+        const planB = usablePlans[j];
+
+        // Try combinations: 1-3 of each truck type
+        for (let countA = 1; countA <= 3; countA++) {
+          for (let countB = 1; countB <= 3; countB++) {
+            const totalCapacity = planA.truck.cbm * planA.truck.usableSpace / 100 * countA + planB.truck.cbm * planB.truck.usableSpace / 100 * countB;
+            const totalWeightCapacity = planA.truck.maxWeight * countA + planB.truck.maxWeight * countB;
+
+            if (totalCBM <= totalCapacity && totalWeight <= totalWeightCapacity) {
+              const priceA = planA.pricePerTruck!;
+              const priceB = planB.pricePerTruck!;
+              const totalPrice = priceA * countA + priceB * countB;
+
+              if (totalPrice < cheapestSingle) {
+                results.push({
+                  trucks: [
+                    { truck: planA.truck, count: countA, pricePerTruck: priceA },
+                    { truck: planB.truck, count: countB, pricePerTruck: priceB },
+                  ],
+                  totalPrice,
+                  description: `${countA}× ${planA.truck.name} + ${countB}× ${planB.truck.name}`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Sort by total price ascending and return unique best
+    results.sort((a, b) => a.totalPrice! - b.totalPrice!);
+    return results;
+  }, [truckPlans, totalCBM, totalWeight, distance]);
 
   // Memoize recommended truck — performBinPacking is expensive, avoid recalculating on every render
   const recommendedTruck = useMemo(() => {
@@ -264,9 +475,6 @@ export default function Home() {
     }
     return null;
   }, [cargoItems, totalCBM, totalWeight]);
-
-  const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
-  const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
   const addCargoItem = () => {
     setCargoItems([...cargoItems, { id: crypto.randomUUID(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
@@ -350,11 +558,14 @@ export default function Home() {
       {/* Tab Navigation */}
       <div className="max-w-4xl mx-auto px-4 pt-4 w-full">
         <div className="flex gap-2 bg-white rounded-lg shadow p-1">
-          <button onClick={() => setActiveTab('cbm')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'cbm' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          <button onClick={() => setActiveTab('cbm')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all text-sm ${activeTab === 'cbm' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             📦 คำนวณ CBM
           </button>
-          <button onClick={() => setActiveTab('price')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${activeTab === 'price' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          <button onClick={() => setActiveTab('price')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all text-sm ${activeTab === 'price' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             💰 คำนวณราคา
+          </button>
+          <button onClick={() => setActiveTab('compare')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all text-sm ${activeTab === 'compare' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            🚚 เปรียบเทียบแผน
           </button>
         </div>
       </div>
@@ -821,6 +1032,306 @@ export default function Home() {
                 ) : null}
               </div>
             </section>
+
+            {/* Go to Compare Button */}
+            {allItemsValid && totalCBM > 0 && distance && (
+              <button
+                onClick={() => setActiveTab('compare')}
+                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold hover:from-purple-700 hover:to-indigo-700 transition"
+              >
+                🚚 เปรียบเทียบแผนขนส่ง
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ===== Compare Plans Tab ===== */}
+        {activeTab === 'compare' && (
+          <div className="space-y-6">
+            {!allItemsValid || totalCBM <= 0 || !distance ? (
+              <section className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4">
+                  <h2 className="text-lg font-bold">🚚 เปรียบเทียบแผนขนส่ง</h2>
+                  <p className="text-purple-100 text-sm">เปรียบเทียบราคาและความเหมาะสมของแต่ละประเภทรถ</p>
+                </div>
+                <div className="p-6 text-center">
+                  <div className="text-6xl mb-4">📋</div>
+                  <p className="text-gray-600 font-medium mb-2">กรุณากรอกข้อมูลให้ครบก่อน</p>
+                  <p className="text-sm text-gray-400 mb-4">ต้องกรอกข้อมูลสินค้าและระยะทางก่อนจึงจะเปรียบเทียบแผนได้</p>
+                  <div className="space-y-2 text-sm text-left max-w-xs mx-auto">
+                    {!allItemsValid && (
+                      <div className="flex items-center gap-2 text-amber-600">
+                        <span>⚠️</span>
+                        <span>กรุณากรอกข้อมูลสินค้าให้ครบ (กว้าง, ยาว, สูง, น้ำหนัก)</span>
+                      </div>
+                    )}
+                    {totalCBM <= 0 && (
+                      <div className="flex items-center gap-2 text-amber-600">
+                        <span>⚠️</span>
+                        <span>ปริมาตรสินค้าต้องมากกว่า 0</span>
+                      </div>
+                    )}
+                    {!distance && (
+                      <div className="flex items-center gap-2 text-amber-600">
+                        <span>⚠️</span>
+                        <span>กรุณากรอกระยะทางในแท็บ "คำนวณราคา"</span>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setActiveTab(totalCBM <= 0 || !allItemsValid ? 'cbm' : 'price')}
+                    className="mt-4 px-6 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-indigo-600 transition"
+                  >
+                    {totalCBM <= 0 || !allItemsValid ? '📦 ไปกรอกข้อมูลสินค้า' : '💰 ไปกรอกระยะทาง'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <>
+                {/* Summary Badges */}
+                {(() => {
+                  const usablePlans = truckPlans.filter(p => p.canUse && p.totalPrice !== null);
+                  const cheapestPlan = usablePlans.length > 0 ? usablePlans.reduce((a, b) => (a.totalPrice ?? Infinity) < (b.totalPrice ?? Infinity) ? a : b) : null;
+                  const fewestTrucks = usablePlans.length > 0 ? usablePlans.reduce((a, b) => a.truckCount < b.truckCount ? a : b) : null;
+                  const leastWaste = usablePlans.length > 0 ? usablePlans.reduce((a, b) => a.volumeUsage > b.volumeUsage ? a : b) : null;
+                  // Best value = cheapest per CBM
+                  const bestValue = usablePlans.length > 0 ? usablePlans.reduce((a, b) => ((a.totalPrice ?? Infinity) / Math.max(a.volumeUsage, 0.01)) < ((b.totalPrice ?? Infinity) / Math.max(b.volumeUsage, 0.01)) ? a : b) : null;
+                  const cheapestMixed = mixedTruckPlans.length > 0 ? mixedTruckPlans[0] : null;
+
+                  return (
+                    <section className="bg-white rounded-xl shadow-lg overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4">
+                        <h2 className="text-lg font-bold">🚚 เปรียบเทียบแผนขนส่ง</h2>
+                        <p className="text-purple-100 text-sm">เปรียบเทียบราคาและความเหมาะสมของแต่ละประเภทรถ</p>
+                      </div>
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className={`rounded-xl p-3 text-center border-2 ${cheapestPlan ? 'border-emerald-400 bg-emerald-50' : 'bg-gray-50 border-gray-200'}`}>
+                            <p className="text-2xl">🏷️</p>
+                            <p className="text-xs text-gray-500 mt-1">ถูกที่สุด</p>
+                            <p className="font-bold text-sm text-emerald-700">{cheapestPlan ? cheapestPlan.truck.name : '-'}</p>
+                            <p className="text-xs text-emerald-600">{cheapestPlan ? `฿${cheapestPlan.totalPrice?.toLocaleString()}` : '-'}</p>
+                          </div>
+                          <div className={`rounded-xl p-3 text-center border-2 ${fewestTrucks ? 'border-blue-400 bg-blue-50' : 'bg-gray-50 border-gray-200'}`}>
+                            <p className="text-2xl">🚛</p>
+                            <p className="text-xs text-gray-500 mt-1">ใช้รถน้อยที่สุด</p>
+                            <p className="font-bold text-sm text-blue-700">{fewestTrucks ? fewestTrucks.truck.name : '-'}</p>
+                            <p className="text-xs text-blue-600">{fewestTrucks ? `${fewestTrucks.truckCount} คัน` : '-'}</p>
+                          </div>
+                          <div className={`rounded-xl p-3 text-center border-2 ${leastWaste ? 'border-amber-400 bg-amber-50' : 'bg-gray-50 border-gray-200'}`}>
+                            <p className="text-2xl">📦</p>
+                            <p className="text-xs text-gray-500 mt-1">พื้นที่เหลือน้อยสุด</p>
+                            <p className="font-bold text-sm text-amber-700">{leastWaste ? leastWaste.truck.name : '-'}</p>
+                            <p className="text-xs text-amber-600">{leastWaste ? `${leastWaste.volumeUsage.toFixed(1)}%` : '-'}</p>
+                          </div>
+                          <div className={`rounded-xl p-3 text-center border-2 ${bestValue ? 'border-purple-400 bg-purple-50' : 'bg-gray-50 border-gray-200'}`}>
+                            <p className="text-2xl">⚖️</p>
+                            <p className="text-xs text-gray-500 mt-1">คุ้มค่าที่สุด</p>
+                            <p className="font-bold text-sm text-purple-700">{bestValue ? bestValue.truck.name : '-'}</p>
+                            <p className="text-xs text-purple-600">{bestValue ? `฿${bestValue.totalPrice?.toLocaleString()}` : '-'}</p>
+                          </div>
+                        </div>
+                        {cheapestMixed && cheapestPlan && (
+                          <div className="mt-3 bg-gradient-to-r from-teal-50 to-cyan-50 border-2 border-teal-300 rounded-xl p-3 text-center">
+                            <p className="font-bold text-teal-700">🔀 รถผสมถูกกว่า!</p>
+                            <p className="text-sm text-teal-600">{cheapestMixed.description} รวม ฿{cheapestMixed.totalPrice?.toLocaleString()} (ประหยัดกว่าแผนเดี่ยว ฿{(cheapestPlan.totalPrice! - cheapestMixed.totalPrice!).toLocaleString()})</p>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  );
+                })()}
+
+                {/* Cargo Summary */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+                    <p className="text-gray-600 text-sm">ปริมาตรรวม</p>
+                    <p className="text-2xl font-bold text-blue-600">{totalCBM.toFixed(4)} m³</p>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-lg p-4 text-center">
+                    <p className="text-gray-600 text-sm">น้ำหนักรวม</p>
+                    <p className="text-2xl font-bold text-orange-600">{totalWeight.toLocaleString()} kg</p>
+                  </div>
+                </div>
+
+                {/* Individual Truck Plans */}
+                {(() => {
+                  const usablePlans = truckPlans.filter(p => p.canUse && p.totalPrice !== null);
+                  const cheapestPlan = usablePlans.length > 0 ? usablePlans.reduce((a, b) => (a.totalPrice ?? Infinity) < (b.totalPrice ?? Infinity) ? a : b) : null;
+
+                  return (
+                    <section className="bg-white rounded-xl shadow-lg overflow-hidden">
+                      <div className="bg-gradient-to-r from-slate-700 to-slate-800 text-white px-6 py-4">
+                        <h2 className="text-lg font-bold">🚛 แผนรถเดี่ยว</h2>
+                        <p className="text-slate-300 text-sm">เปรียบเทียบราคาสำหรับแต่ละประเภทรถ</p>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        {truckPlans.map((plan) => {
+                          const isCheapest = cheapestPlan && plan.truck.id === cheapestPlan.truck.id && plan.canUse;
+                          const isExpanded = expandedTruck === plan.truck.id;
+
+                          return (
+                            <div
+                              key={plan.truck.id}
+                              className={`rounded-xl border-2 overflow-hidden transition-all ${
+                                !plan.canUse
+                                  ? 'border-red-200 bg-red-50/50'
+                                  : isCheapest
+                                  ? 'border-emerald-400 bg-emerald-50/30 shadow-md'
+                                  : 'border-gray-200 bg-white hover:border-gray-300'
+                              }`}
+                            >
+                              {/* Card Header */}
+                              <div
+                                className={`flex items-center justify-between p-4 cursor-pointer ${plan.canUse ? 'hover:bg-gray-50' : 'opacity-60'}`}
+                                onClick={() => plan.canUse && setExpandedTruck(isExpanded ? null : plan.truck.id)}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg ${
+                                    !plan.canUse ? 'bg-red-100' : isCheapest ? 'bg-emerald-100' : 'bg-slate-100'
+                                  }`}>
+                                    {!plan.canUse ? '❌' : isCheapest ? '🏆' : '🚛'}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-bold text-gray-800">{plan.truck.name}</p>
+                                      {isCheapest && (
+                                        <span className="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded-full">ถูกที่สุด</span>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-gray-500">
+                                      {!plan.canUse
+                                        ? plan.reason
+                                        : `${plan.truckCount} คัน · ฿${plan.pricePerTruck?.toLocaleString()}/คัน`
+                                      }
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  {!plan.canUse ? (
+                                    <span className="text-sm font-bold text-red-500">ไม่สามารถใช้ได้</span>
+                                  ) : (
+                                    <>
+                                      <p className="text-xl font-bold text-emerald-600">฿{plan.totalPrice?.toLocaleString()}</p>
+                                      {plan.truckCount > 1 && (
+                                        <p className="text-xs text-gray-400">฿{plan.pricePerTruck?.toLocaleString()} × {plan.truckCount}</p>
+                                      )}
+                                    </>
+                                  )}
+                                  {plan.canUse && (
+                                    <span className={`text-xs text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Expanded Details */}
+                              {plan.canUse && isExpanded && (
+                                <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
+                                  <div className="pt-3">
+                                    <p className="text-sm font-medium text-gray-700 mb-2">📊 รายละเอียด</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <div className="bg-gray-50 rounded-lg p-3">
+                                        <p className="text-xs text-gray-500">การใช้พื้นที่</p>
+                                        <p className="font-bold text-gray-800">{plan.volumeUsage.toFixed(1)}%</p>
+                                        <div className="bg-gray-200 rounded-full h-2 mt-1">
+                                          <div
+                                            className={`h-2 rounded-full ${plan.volumeUsage > 90 ? 'bg-red-500' : plan.volumeUsage > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                            style={{ width: `${Math.min(plan.volumeUsage, 100)}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="bg-gray-50 rounded-lg p-3">
+                                        <p className="text-xs text-gray-500">การใช้น้ำหนัก</p>
+                                        <p className="font-bold text-gray-800">{plan.weightUsage.toFixed(1)}%</p>
+                                        <div className="bg-gray-200 rounded-full h-2 mt-1">
+                                          <div
+                                            className={`h-2 rounded-full ${plan.weightUsage > 100 ? 'bg-red-500' : plan.weightUsage > 80 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                                            style={{ width: `${Math.min(plan.weightUsage, 100)}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {plan.binPackingResult && (
+                                    <div className="bg-gray-50 rounded-lg p-3">
+                                      <p className="text-sm font-medium text-gray-700 mb-1">📦 ผลการจัดวาง (Bin Packing)</p>
+                                      <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                                        <div>
+                                          <p className="text-gray-500">วางได้</p>
+                                          <p className="font-bold text-emerald-600">{plan.binPackingResult.items.length} ชิ้น</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-gray-500">วางไม่ได้</p>
+                                          <p className="font-bold text-red-600">{plan.binPackingResult.unfittedItems.length} ชิ้น</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-gray-500">ใช้พื้นที่ 3D</p>
+                                          <p className="font-bold text-blue-600">{plan.binPackingResult.utilizationPercent.toFixed(1)}%</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+                                    <p>📏 ระยะทาง: {parseFloat(distance).toLocaleString()} กม.</p>
+                                    <p>⛽ ราคาน้ำมัน: {currentOilPrice.toFixed(2)} บาท/ลิตร</p>
+                                    <p>🚛 ขนาดรถ: {plan.truck.dimensions.width}×{plan.truck.dimensions.length}×{plan.truck.dimensions.height} ม.</p>
+                                    <p>📦 ความจุ: {plan.truck.cbm} CBM | น้ำหนักสูงสุด: {plan.truck.maxWeight.toLocaleString()} kg</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })()}
+
+                {/* Mixed Trucks Section */}
+                {mixedTruckPlans.length > 0 && (
+                  <section className="bg-white rounded-xl shadow-lg overflow-hidden">
+                    <div className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white px-6 py-4">
+                      <h2 className="text-lg font-bold">🔀 รถผสม</h2>
+                      <p className="text-teal-100 text-sm">แผนที่ใช้รถหลายประเภทรวมกัน (ถูกกว่าแผนรถเดี่ยว)</p>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      {mixedTruckPlans.slice(0, 3).map((mixedPlan, idx) => (
+                        <div
+                          key={idx}
+                          className={`rounded-xl border-2 p-4 ${
+                            idx === 0 ? 'border-teal-400 bg-teal-50/30 shadow-md' : 'border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              {idx === 0 && <span className="text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full">ถูกที่สุด</span>}
+                              <p className="font-bold text-gray-800">{mixedPlan.description}</p>
+                            </div>
+                            <p className="text-xl font-bold text-teal-600">฿{mixedPlan.totalPrice?.toLocaleString()}</p>
+                          </div>
+                          <div className="space-y-2">
+                            {mixedPlan.trucks.map((t, tIdx) => (
+                              <div key={tIdx} className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+                                <div>
+                                  <p className="font-medium text-gray-800">{t.count}× {t.truck.name}</p>
+                                  <p className="text-xs text-gray-500">{t.truck.cbm} CBM | {t.truck.maxWeight.toLocaleString()} kg/คัน</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-gray-700">฿{t.pricePerTruck?.toLocaleString()}/คัน</p>
+                                  <p className="text-xs text-gray-400">฿{(t.pricePerTruck ?? 0) * t.count} รวม</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
           </div>
         )}
       </main>
