@@ -295,3 +295,93 @@ export function performBinPacking(
     unfittedItems,
   };
 }
+
+/**
+ * Check if a single item can dimensionally fit inside a truck.
+ * Compares item dimensions (after rotation) against truck interior dimensions.
+ */
+export function canItemFitInTruck(item: CargoItem, truck: TruckType): boolean {
+  const truckDimensions = truck.dimensions;
+  const usableFactor = truck.usableSpace / 100;
+  const effectiveW = truckDimensions.width * 100 * Math.cbrt(usableFactor);
+  const effectiveL = truckDimensions.length * 100 * Math.cbrt(usableFactor);
+  const effectiveH = truckDimensions.height * 100 * Math.cbrt(usableFactor);
+
+  const rotations = getRotations({ width: item.width, length: item.length, height: item.height });
+  return rotations.some(r =>
+    r.width <= effectiveW && r.length <= effectiveL && r.height <= effectiveH
+  );
+}
+
+/**
+ * Apply weight constraint to bin packing result.
+ * If the total weight of fitted items exceeds the truck's max weight,
+ * remove the heaviest items that don't fit until under the limit.
+ * Returns the modified BinPackingResult with unfitted items moved to unfittedItems.
+ */
+export function applyWeightConstraint(
+  result: BinPackingResult,
+  cargoItems: CargoItem[],
+  maxWeight: number
+): BinPackingResult {
+  // Calculate total weight of fitted items
+  let totalWeight = 0;
+  const itemWeights = new Map<string, number>();
+
+  for (const packed of result.items) {
+    const key = `${packed.cargoIndex}-${packed.itemIndex}`;
+    const cargo = cargoItems[packed.cargoIndex];
+    const weight = cargo ? cargo.weight : 0;
+    itemWeights.set(key, weight);
+    totalWeight += weight;
+  }
+
+  // If within weight limit, return as-is
+  if (totalWeight <= maxWeight) {
+    return result;
+  }
+
+  // Sort fitted items by weight descending — remove heaviest first
+  const sortedItems = [...result.items].sort((a, b) => {
+    const wA = itemWeights.get(`${a.cargoIndex}-${a.itemIndex}`) || 0;
+    const wB = itemWeights.get(`${b.cargoIndex}-${b.itemIndex}`) || 0;
+    return wB - wA;
+  });
+
+  const keptItems: typeof result.items = [];
+  const removedItems: typeof result.unfittedItems = [];
+  let currentWeight = 0;
+
+  // Re-add items from lightest to heaviest, skipping ones that would exceed maxWeight
+  const lightestFirst = [...sortedItems].reverse();
+  for (const packed of lightestFirst) {
+    const weight = itemWeights.get(`${packed.cargoIndex}-${packed.itemIndex}`) || 0;
+    if (currentWeight + weight <= maxWeight) {
+      keptItems.push(packed);
+      currentWeight += weight;
+    } else {
+      removedItems.push({
+        cargoIndex: packed.cargoIndex,
+        itemIndex: packed.itemIndex,
+        reason: `น้ำหนักเกิน (${weight.toLocaleString()} kg ทำให้เกิน ${maxWeight.toLocaleString()} kg)`,
+      });
+    }
+  }
+
+  // Recalculate utilized CBM
+  const keptCBM = keptItems.reduce((sum, packed) => {
+    const cargo = cargoItems[packed.cargoIndex];
+    if (!cargo) return sum;
+    return sum + (cargo.width * cargo.length * cargo.height) / 1000000;
+  }, 0);
+
+  return {
+    items: keptItems,
+    utilizedCBM: keptCBM,
+    totalCBM: result.totalCBM,
+    truckCapacityCBM: result.truckCapacityCBM,
+    utilizationPercent: result.truckCapacityCBM > 0 ? (keptCBM / result.truckCapacityCBM) * 100 : 0,
+    canFitAll: result.unfittedItems.length === 0 && removedItems.length === 0,
+    unfittedItems: [...result.unfittedItems, ...removedItems],
+  };
+}
