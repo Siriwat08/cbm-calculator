@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { truckTypes, getTruckByJobKey } from '@/lib/truck-data';
 import { FALLBACK_DIESEL_PRICE, LABOR_COST, CARGO_LIMITS } from '@/lib/oil-price-api';
-import { performBinPacking } from '@/lib/bin-packing';
+import { performBinPacking, applyWeightConstraint } from '@/lib/bin-packing';
 import { formatDisplayDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
 import { useToast } from '@/hooks/use-toast';
@@ -39,7 +39,7 @@ export default function Home() {
   // ===== CBM Calculator State =====
   const [selectedTruck, setSelectedTruck] = useState<TruckType>(truckTypes[0]);
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([
-    { id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 },
+    { id: '1', width: 0, length: 0, height: 0, quantity: 0, weight: 0 },
   ]);
   const [showPopup, setShowPopup] = useState(false);
   const [popupImage, setPopupImage] = useState('');
@@ -276,7 +276,7 @@ export default function Home() {
   const calculateCBM = (item: CargoItem) => ((item.width * item.length * item.height) / 1000000) * item.quantity;
   const totalCBM = cargoItems.reduce((sum, item) => sum + calculateCBM(item), 0);
   const totalWeight = cargoItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
-  const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0);
+  const allItemsValid = cargoItems.every((item) => item.width > 0 && item.length > 0 && item.height > 0 && item.weight > 0 && item.quantity > 0);
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
   // ===== Compare Tab: Price Calculation Helper =====
@@ -327,6 +327,7 @@ export default function Home() {
     binPackingResult: BinPackingResult | null;
     weightUsage: number;
     volumeUsage: number;
+    trips: { tripIndex: number; items: CargoItem[]; binPackingResult: BinPackingResult; weight: number; volume: number }[];
   }
 
   interface MixedTruckPlan {
@@ -339,6 +340,8 @@ export default function Home() {
     if (!allItemsValid || totalCBM <= 0 || !distance) return [];
     const dist = parseFloat(distance);
     if (isNaN(dist) || dist <= 0) return [];
+
+    const MAX_TRIPS = 10;
 
     return truckTypes.map((truck) => {
       // Check if any single item is too large for the truck
@@ -364,27 +367,15 @@ export default function Home() {
           binPackingResult: null,
           weightUsage: 0,
           volumeUsage: 0,
+          trips: [],
         };
       }
 
+      // Check if a single item is too heavy
+      const singleItemTooHeavy = cargoItems.some(item => item.weight > truck.maxWeight);
       const bpResult = performBinPacking(cargoItems, truck);
       const pricePerTruck = calculateTruckPrice(rateData, truck.jobKey, currentOilPrice, dist);
 
-      const fitsByVolume = bpResult.canFitAll;
-      const fitsByWeight = totalWeight <= truck.maxWeight;
-
-      let truckCount = 1;
-      if (fitsByVolume && fitsByWeight) {
-        truckCount = 1;
-      } else {
-        const trucksByWeight = Math.ceil(totalWeight / truck.maxWeight);
-        const trucksByVolume = Math.ceil(totalCBM / (truck.cbm * truck.usableSpace / 100));
-        truckCount = Math.max(trucksByWeight, trucksByVolume, 1);
-      }
-
-      // Check if total weight can ever be distributed (individual item weight check already done above)
-      // Even with multiple trucks, if a single item weight exceeds maxWeight, can't use
-      const singleItemTooHeavy = cargoItems.some(item => item.weight > truck.maxWeight);
       if (singleItemTooHeavy) {
         return {
           truck,
@@ -396,9 +387,56 @@ export default function Home() {
           binPackingResult: bpResult,
           weightUsage: (totalWeight / truck.maxWeight) * 100,
           volumeUsage: bpResult.utilizationPercent,
+          trips: [],
         };
       }
 
+      // Calculate trips by simulating bin packing for each trip
+      const trips: { tripIndex: number; items: CargoItem[]; binPackingResult: BinPackingResult; weight: number; volume: number }[] = [];
+      let remaining = [...cargoItems];
+
+      for (let tripNum = 0; tripNum < MAX_TRIPS && remaining.length > 0; tripNum++) {
+        const rawBpResult = performBinPacking(remaining, truck);
+        const tripBpResult = applyWeightConstraint(rawBpResult, remaining, truck.maxWeight);
+
+        // Split items based on packing result
+        const fittedCounts = new Map<number, number>();
+        for (const packed of tripBpResult.items) {
+          fittedCounts.set(packed.cargoIndex, (fittedCounts.get(packed.cargoIndex) || 0) + 1);
+        }
+
+        const fittedItems: CargoItem[] = [];
+        const unfittedItems: CargoItem[] = [];
+
+        remaining.forEach((item, idx) => {
+          const fitted = fittedCounts.get(idx) || 0;
+          if (fitted === 0) {
+            unfittedItems.push(item);
+          } else if (fitted >= item.quantity) {
+            fittedItems.push(item);
+          } else {
+            // Partial fit — some pieces fitted, some not
+            fittedItems.push({ ...item, quantity: fitted });
+            unfittedItems.push({ ...item, quantity: item.quantity - fitted });
+          }
+        });
+
+        const tripWeight = fittedItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+        const tripVolume = fittedItems.reduce((sum, item) => sum + ((item.width * item.length * item.height) / 1000000) * item.quantity, 0);
+
+        trips.push({
+          tripIndex: tripNum + 1,
+          items: fittedItems,
+          binPackingResult: tripBpResult,
+          weight: tripWeight,
+          volume: tripVolume,
+        });
+
+        if (fittedItems.length === 0) break;
+        remaining = unfittedItems;
+      }
+
+      const truckCount = trips.length;
       const totalPrice = pricePerTruck !== null ? pricePerTruck * truckCount : null;
       const weightUsage = (totalWeight / (truck.maxWeight * truckCount)) * 100;
       const volumeUsage = truckCount === 1 ? bpResult.utilizationPercent : (totalCBM / (truck.cbm * truckCount)) * 100;
@@ -412,6 +450,7 @@ export default function Home() {
         binPackingResult: bpResult,
         weightUsage,
         volumeUsage,
+        trips,
       };
     });
   }, [cargoItems, allItemsValid, totalCBM, totalWeight, distance, rateData, currentOilPrice]);
@@ -477,7 +516,7 @@ export default function Home() {
   }, [cargoItems, totalCBM, totalWeight]);
 
   const addCargoItem = () => {
-    setCargoItems([...cargoItems, { id: crypto.randomUUID(), width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
+    setCargoItems([...cargoItems, { id: crypto.randomUUID(), width: 0, length: 0, height: 0, quantity: 0, weight: 0 }]);
   };
 
   const removeCargoItem = (id: string) => {
@@ -489,7 +528,7 @@ export default function Home() {
   };
 
   const resetForm = () => {
-    setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 1, weight: 0 }]);
+    setCargoItems([{ id: '1', width: 0, length: 0, height: 0, quantity: 0, weight: 0 }]);
     setSelectedTruck(truckTypes[0]);
   };
 
@@ -652,8 +691,8 @@ export default function Home() {
                         <input type="number" value={item.height || ''} onChange={(e) => updateCargoItem(item.id, 'height', parseFloat(e.target.value) || 0)} inputMode="decimal" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="0" min="0.1" max={CARGO_LIMITS.MAX_DIMENSION_CM} step="0.1" />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500 font-medium">จำนวน</label>
-                        <input type="number" value={item.quantity} onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 1)} inputMode="numeric" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" min="1" max={CARGO_LIMITS.MAX_QUANTITY} />
+                        <label className="text-xs text-gray-500 font-medium">จำนวน *</label>
+                        <input type="number" value={item.quantity || ''} onChange={(e) => updateCargoItem(item.id, 'quantity', parseInt(e.target.value) || 0)} inputMode="numeric" className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-emerald-500 focus:outline-none" placeholder="1" min="1" max={CARGO_LIMITS.MAX_QUANTITY} />
                       </div>
                       <div>
                         <label className="text-xs text-gray-500 font-medium">น้ำหนัก (kg) *</label>
@@ -1168,15 +1207,15 @@ export default function Home() {
                           </div>
                           <div className={`rounded-xl p-3 text-center border-2 ${leastWaste ? 'border-amber-400 bg-amber-50' : 'bg-gray-50 border-gray-200'}`}>
                             <p className="text-2xl">📦</p>
-                            <p className="text-xs text-gray-500 mt-1">พื้นที่เหลือน้อยสุด</p>
+                            <p className="text-xs text-gray-500 mt-1">ใช้พื้นที่เต็มที่สุด</p>
                             <p className="font-bold text-sm text-amber-700">{leastWaste ? leastWaste.truck.name : '-'}</p>
-                            <p className="text-xs text-amber-600">{leastWaste ? `${leastWaste.volumeUsage.toFixed(1)}%` : '-'}</p>
+                            <p className="text-xs text-amber-600">{leastWaste ? `ใช้ ${leastWaste.volumeUsage.toFixed(1)}%` : '-'}</p>
                           </div>
                           <div className={`rounded-xl p-3 text-center border-2 ${bestValue ? 'border-purple-400 bg-purple-50' : 'bg-gray-50 border-gray-200'}`}>
                             <p className="text-2xl">⚖️</p>
-                            <p className="text-xs text-gray-500 mt-1">คุ้มค่าที่สุด</p>
+                            <p className="text-xs text-gray-500 mt-1">ราคา/CBM ถูกสุด</p>
                             <p className="font-bold text-sm text-purple-700">{bestValue ? bestValue.truck.name : '-'}</p>
-                            <p className="text-xs text-purple-600">{bestValue ? `฿${bestValue.totalPrice?.toLocaleString()}` : '-'}</p>
+                            <p className="text-xs text-purple-600">{bestValue ? `฿${((bestValue.totalPrice ?? 0) / Math.max(totalCBM, 0.01)).toFixed(0)}/CBM` : '-'}</p>
                           </div>
                         </div>
                         {cheapestMixed && cheapestPlan && (
@@ -1276,7 +1315,7 @@ export default function Home() {
                               {plan.canUse && isExpanded && (
                                 <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
                                   <div className="pt-3">
-                                    <p className="text-sm font-medium text-gray-700 mb-2">📊 รายละเอียด</p>
+                                    <p className="text-sm font-medium text-gray-700 mb-2">📊 ภาพรวม</p>
                                     <div className="grid grid-cols-2 gap-3">
                                       <div className="bg-gray-50 rounded-lg p-3">
                                         <p className="text-xs text-gray-500">การใช้พื้นที่</p>
@@ -1301,22 +1340,54 @@ export default function Home() {
                                     </div>
                                   </div>
 
-                                  {plan.binPackingResult && (
-                                    <div className="bg-gray-50 rounded-lg p-3">
-                                      <p className="text-sm font-medium text-gray-700 mb-1">📦 ผลการจัดวาง (Bin Packing)</p>
-                                      <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                                        <div>
-                                          <p className="text-gray-500">วางได้</p>
-                                          <p className="font-bold text-emerald-600">{plan.binPackingResult.items.length} ชิ้น</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-gray-500">วางไม่ได้</p>
-                                          <p className="font-bold text-red-600">{plan.binPackingResult.unfittedItems.length} ชิ้น</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-gray-500">ใช้พื้นที่ 3D</p>
-                                          <p className="font-bold text-blue-600">{plan.binPackingResult.utilizationPercent.toFixed(1)}%</p>
-                                        </div>
+                                  {/* Per-trip details */}
+                                  {plan.trips.length > 0 && (
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-700 mb-2">🚛 รายละเอียดแต่ละคัน ({plan.trips.length} คัน)</p>
+                                      <div className="space-y-2">
+                                        {plan.trips.map((trip) => (
+                                          <div key={trip.tripIndex} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                                            <div className="flex items-center justify-between mb-2">
+                                              <p className="font-medium text-gray-800 text-sm">คันที่ {trip.tripIndex}</p>
+                                              <p className="text-sm font-bold text-emerald-600">฿{plan.pricePerTruck?.toLocaleString()}</p>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                              <div>
+                                                <p className="text-gray-500">น้ำหนัก</p>
+                                                <p className="font-medium">{trip.weight.toLocaleString()} / {plan.truck.maxWeight.toLocaleString()} kg</p>
+                                                <div className="bg-gray-200 rounded-full h-1.5 mt-1">
+                                                  <div
+                                                    className={`h-1.5 rounded-full ${(trip.weight / plan.truck.maxWeight * 100) > 90 ? 'bg-red-500' : (trip.weight / plan.truck.maxWeight * 100) > 70 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                                                    style={{ width: `${Math.min((trip.weight / plan.truck.maxWeight) * 100, 100)}%` }}
+                                                  />
+                                                </div>
+                                              </div>
+                                              <div>
+                                                <p className="text-gray-500">ปริมาตร</p>
+                                                <p className="font-medium">{trip.volume.toFixed(4)} / {plan.truck.cbm} CBM</p>
+                                                <div className="bg-gray-200 rounded-full h-1.5 mt-1">
+                                                  <div
+                                                    className={`h-1.5 rounded-full ${trip.binPackingResult.utilizationPercent > 90 ? 'bg-red-500' : trip.binPackingResult.utilizationPercent > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                                    style={{ width: `${Math.min(trip.binPackingResult.utilizationPercent, 100)}%` }}
+                                                  />
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-gray-500">
+                                              วางได้ {trip.binPackingResult.items.length} ชิ้น · ใช้พื้นที่ 3D {trip.binPackingResult.utilizationPercent.toFixed(1)}%
+                                            </div>
+                                            {trip.items.length > 0 && (
+                                              <div className="mt-2 space-y-1">
+                                                {trip.items.map((item, iIdx) => (
+                                                  <div key={iIdx} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border">
+                                                    <span className="text-gray-700">{item.width}×{item.length}×{item.height} ซม. {item.quantity > 1 ? `(${item.quantity} ชิ้น)` : ''}</span>
+                                                    <span className="text-gray-500">{item.weight * item.quantity} kg</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
                                       </div>
                                     </div>
                                   )}
@@ -1348,18 +1419,27 @@ export default function Home() {
                       {mixedTruckPlans.slice(0, 3).map((mixedPlan, idx) => (
                         <div
                           key={idx}
-                          className={`rounded-xl border-2 p-4 ${
+                          className={`rounded-xl border-2 overflow-hidden ${
                             idx === 0 ? 'border-teal-400 bg-teal-50/30 shadow-md' : 'border-gray-200'
                           }`}
                         >
-                          <div className="flex items-center justify-between mb-3">
+                          {/* Header - clickable to expand */}
+                          <div
+                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50/50"
+                            onClick={() => setExpandedTruck(expandedTruck === `mixed-${idx}` ? null : `mixed-${idx}`)}
+                          >
                             <div className="flex items-center gap-2">
                               {idx === 0 && <span className="text-xs bg-teal-500 text-white px-2 py-0.5 rounded-full">ถูกที่สุด</span>}
                               <p className="font-bold text-gray-800">{mixedPlan.description}</p>
                             </div>
-                            <p className="text-xl font-bold text-teal-600">฿{mixedPlan.totalPrice?.toLocaleString()}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xl font-bold text-teal-600">฿{mixedPlan.totalPrice?.toLocaleString()}</p>
+                              <span className={`text-xs text-gray-400 transition-transform ${expandedTruck === `mixed-${idx}` ? 'rotate-180' : ''}`}>▼</span>
+                            </div>
                           </div>
-                          <div className="space-y-2">
+
+                          {/* Summary cards (always visible) */}
+                          <div className="px-4 pb-2 space-y-2">
                             {mixedPlan.trucks.map((t, tIdx) => (
                               <div key={tIdx} className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
                                 <div>
@@ -1368,11 +1448,51 @@ export default function Home() {
                                 </div>
                                 <div className="text-right">
                                   <p className="font-bold text-gray-700">฿{t.pricePerTruck?.toLocaleString()}/คัน</p>
-                                  <p className="text-xs text-gray-400">฿{(t.pricePerTruck ?? 0) * t.count} รวม</p>
+                                  <p className="text-xs text-gray-400">฿{((t.pricePerTruck ?? 0) * t.count).toLocaleString()} รวม</p>
                                 </div>
                               </div>
                             ))}
                           </div>
+
+                          {/* Expanded details */}
+                          {expandedTruck === `mixed-${idx}` && (
+                            <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
+                              {mixedPlan.trucks.map((t, tIdx) => {
+                                // Find matching truck plan to get trip details
+                                const matchingPlan = truckPlans.find(p => p.truck.id === t.truck.id);
+                                return (
+                                  <div key={tIdx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                                    <p className="font-medium text-gray-800 text-sm mb-2">{t.truck.name} — {t.count} คัน</p>
+                                    {matchingPlan && matchingPlan.trips.length > 0 ? (
+                                      <div className="space-y-1">
+                                        {matchingPlan.trips.slice(0, t.count).map((trip) => (
+                                          <div key={trip.tripIndex} className="bg-white rounded px-2 py-1.5 border text-xs">
+                                            <div className="flex items-center justify-between mb-1">
+                                              <span className="font-medium text-gray-700">คันที่ {trip.tripIndex}</span>
+                                              <span className="text-emerald-600 font-bold">฿{matchingPlan.pricePerTruck?.toLocaleString()}</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-1 text-gray-500">
+                                              <span>น้ำหนัก: {trip.weight.toLocaleString()}/{t.truck.maxWeight.toLocaleString()} kg</span>
+                                              <span>ปริมาตร: {trip.volume.toFixed(3)}/{t.truck.cbm} CBM</span>
+                                            </div>
+                                            <div className="mt-1 text-gray-500">
+                                              วางได้ {trip.binPackingResult.items.length} ชิ้น · 3D {trip.binPackingResult.utilizationPercent.toFixed(1)}%
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-gray-500">ขนาดรถ: {t.truck.dimensions.width}×{t.truck.dimensions.length}×{t.truck.dimensions.height} ม. | ความจุ: {t.truck.cbm} CBM</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+                                <p>📏 ระยะทาง: {parseFloat(distance).toLocaleString()} กม.</p>
+                                <p>💰 ราคารวม: ฿{mixedPlan.totalPrice?.toLocaleString()}</p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
