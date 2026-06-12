@@ -741,16 +741,35 @@ export default function Home() {
                         </div>
                       )}
 
-                      {binPackingResult.unfittedItems.length > 0 && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                          <p className="text-red-800 font-medium">❌ มีสินค้าวางในรถไม่ได้</p>
-                          <ul className="text-sm text-red-600 mt-1 space-y-1">
-                            {binPackingResult.unfittedItems.map((item, idx) => (
-                              <li key={idx}>• {item.reason}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                      {binPackingResult.unfittedItems.length > 0 && (() => {
+                        // Group unfitted items by cargoIndex to avoid showing duplicate entries
+                        const grouped = new Map<number, { count: number; reasons: Set<string> }>();
+                        binPackingResult.unfittedItems.forEach((item) => {
+                          const existing = grouped.get(item.cargoIndex);
+                          if (existing) {
+                            existing.count++;
+                            existing.reasons.add(item.reason);
+                          } else {
+                            grouped.set(item.cargoIndex, { count: 1, reasons: new Set([item.reason]) });
+                          }
+                        });
+                        return (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-red-800 font-medium">❌ มีสินค้าวางในรถไม่ได้ ({binPackingResult.unfittedItems.length} ชิ้น)</p>
+                            <ul className="text-sm text-red-600 mt-1 space-y-1">
+                              {Array.from(grouped.entries()).map(([cargoIndex, data]) => {
+                                const cargo = cargoItems[cargoIndex];
+                                const label = cargo ? `${cargo.width}×${cargo.length}×${cargo.height} ซม.` : `รายการ ${cargoIndex + 1}`;
+                                return (
+                                  <li key={cargoIndex}>
+                                    • {label}{data.count > 1 ? ` × ${data.count} ชิ้น` : ''} — {Array.from(data.reasons).join(', ')}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        );
+                      })()}
 
                       {totalWeight > selectedTruck.maxWeight && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-3">
@@ -761,11 +780,40 @@ export default function Home() {
                     </>
                   )}
 
+                  {/* Smart Recommendation — click to select truck */}
                   {recommendedTruck && recommendedTruck.id !== selectedTruck.id && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <p className="text-blue-800 font-medium">💡 แนะนำ: {recommendedTruck.name} (CBM: {recommendedTruck.cbm}, น้ำหนัก: {recommendedTruck.maxWeight.toLocaleString()} kg)</p>
+                    <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-4 text-center">
+                      <p className="text-emerald-800 font-bold text-lg">🚛 รถแนะนำ</p>
+                      <p className="text-emerald-700 text-xl font-bold mt-1">{recommendedTruck.name} (CBM: {recommendedTruck.cbm})</p>
+                      <button
+                        onClick={() => goToPriceCalculator(recommendedTruck)}
+                        className="mt-3 px-6 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg font-bold hover:from-emerald-600 hover:to-emerald-700 transition text-sm"
+                      >
+                        💰 ไปคำนวณราคา ({recommendedTruck.name})
+                      </button>
                     </div>
                   )}
+                  {!recommendedTruck && binPackingResult && !binPackingResult.canFitAll && (() => {
+                    // No single truck can fit everything — recommend the best multi-trip option
+                    const bestTruck = truckTypes.find(t => {
+                      const r = performBinPacking(cargoItems, t);
+                      return r.items.length > 0;
+                    });
+                    if (!bestTruck) return null;
+                    return (
+                      <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-center">
+                        <p className="text-amber-800 font-bold text-lg">🚛 รถแนะนำ</p>
+                        <p className="text-amber-700 text-xl font-bold mt-1">{bestTruck.name} (CBM: {bestTruck.cbm})</p>
+                        <p className="text-amber-600 text-sm">(สินค้าเกิน 1 คัน ต้องใช้หลายเที่ยว)</p>
+                        <button
+                          onClick={() => goToPriceCalculator(bestTruck)}
+                          className="mt-3 px-6 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-lg font-bold hover:from-amber-600 hover:to-amber-700 transition text-sm"
+                        >
+                          💰 ไปคำนวณราคา ({bestTruck.name})
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                   <button onClick={() => goToPriceCalculator(selectedTruck)} className="w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg font-bold hover:from-emerald-600 hover:to-emerald-700 transition">
                     💰 ไปคำนวณราคาค่าขนส่ง ({selectedTruck.name})
@@ -812,7 +860,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody>
-                        {oilPriceHistory.slice(0, showAllHistory ? oilPriceHistory.length : 10).map((item, index) => {
+                        {oilPriceHistory.slice(0, showAllHistory ? oilPriceHistory.length : 5).map((item, index) => {
                           let statusEmoji = '';
                           let statusText = '';
                           let statusColor = '';
@@ -834,14 +882,14 @@ export default function Home() {
                             </tr>
                           );
                         })}
-                        {oilPriceHistory.length > 10 && (
+                        {oilPriceHistory.length > 5 && (
                           <tr>
                             <td colSpan={5} className="text-center pt-2">
                               <button
                                 onClick={() => setShowAllHistory(!showAllHistory)}
                                 className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
                               >
-                                {showAllHistory ? '▲ แสดงน้อยลง' : `▼ แสดงเพิ่มเติม (${oilPriceHistory.length - 10} รายการ)`}
+                                {showAllHistory ? '▲ แสดงน้อยลง' : `▼ แสดงเพิ่มเติม (${oilPriceHistory.length - 5} รายการ)`}
                               </button>
                             </td>
                           </tr>
