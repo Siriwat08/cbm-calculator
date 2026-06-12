@@ -409,15 +409,7 @@ export default function MultiTripCalculator({
                       </div>
                     </div>
 
-                    {/* Weight limited warning for this trip */}
-                    {trip.binPackingResult.weightLimited && (
-                      <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                        <p className="text-xs text-amber-700 font-medium">
-                          ⚠️ คันนี้ถูกจำกัดด้วยน้ำหนัก: วางได้ {trip.binPackingResult.items.length} ชิ้น ({trip.binPackingResult.fittedWeight?.toLocaleString()} kg / {result.truckType.maxWeight.toLocaleString()} kg)
-                          — ถอดออกเพราะน้ำหนักเกิน {trip.binPackingResult.weightLimitRemovedCount} ชิ้น
-                        </p>
-                      </div>
-                    )}
+                    {/* Weight limited warning — feature not yet implemented in bin packing algorithm */}
 
                     {/* Items list for this trip */}
                     <div className="bg-white rounded-lg p-2 border">
