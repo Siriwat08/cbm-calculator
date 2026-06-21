@@ -8,9 +8,25 @@ export const truckTypes: TruckType[] = [
     image: '/images/Screenshot_20260320_125706_OneDrive.jpg',
     cbm: 6,
     maxWeight: 1500,
-    dimensions: { width: 1.65, length: 2.30, height: 2.0 },
-    usableSpace: 80,
+    // มิติจริง Revo ตอนเดียว (วัดเองเมื่อ 2026-05)
+    //   ความกว้างในจุดกว้างสุด: 1,575 มม.
+    //   ความยาวใน: 2,315 มม.
+    //   ความสูงตู้ทึบจากพื้นกระบะ: 2,100 มม.
+    dimensions: { width: 1.575, length: 2.315, height: 2.100 },
+    usableSpace: 100, // ใช้พื้นที่เต็ม 100% เพราะมีการตัดซุ้มล้อแบบเจาะจงตำแหน่งแล้ว
     jobKey: '4ล้อ_PPY',
+    // ซุ้มล้อ Revo ตอนเดียว — 2 ข้าง (ซ้าย+ขวา)
+    //   มิติซุ้มล้อ: กว้าง 23.75 ซม. × ยาว 80 ซม. × สูง 20 ซม. (ต่อข้าง)
+    //   ตำแหน่ง:
+    //     x=0        (ชิดผนังซ้าย)         — ซุ้มล้อซ้าย
+    //     x=133.75   (157.5 − 23.75 = 133.75) — ซุ้มล้อขวา ชิดผนังขวา
+    //     y=72.5     (ห่างจากผนังหน้ารถ 72.5 ซม.)
+    //     z=0        (วางบนพื้นกระบะ)
+    //   พื้นที่เหนือซุ้มล้อ (z ≥ 20) ยังใช้วางของได้
+    obstacles: [
+      { x: 0, y: 72.5, z: 0, width: 23.75, length: 80, height: 20, label: 'ซุ้มล้อซ้าย' },
+      { x: 133.75, y: 72.5, z: 0, width: 23.75, length: 80, height: 20, label: 'ซุ้มล้อขวา' },
+    ],
   },
   {
     id: 'jumbo',
@@ -19,8 +35,9 @@ export const truckTypes: TruckType[] = [
     cbm: 11,
     maxWeight: 3000,
     dimensions: { width: 1.80, length: 3.20, height: 2.10 },
-    usableSpace: 100,
+    usableSpace: 100, // รถตู้พื้นเรียบ ไม่มีซุ้มล้อ
     jobKey: '4จัมโบ้_PPY',
+    // ไม่มี obstacles — เป็นรถตู้พื้นเรียบ
   },
   {
     id: '6wheel',
@@ -31,6 +48,7 @@ export const truckTypes: TruckType[] = [
     dimensions: { width: 2.40, length: 6.60, height: 2.35 },
     usableSpace: 90,
     jobKey: '6ล้อ_PPY',
+    // ไม่มี obstacles — เป็นรถตู้พื้นเรียบ
   },
 ];
 

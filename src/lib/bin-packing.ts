@@ -10,9 +10,14 @@
  * 3. When an item is placed, it creates 3 sub-spaces (right, front, top)
  * 4. Try all 6 rotations for each item
  * 5. Report which items fit and which don't
+ *
+ * Wheel arch / obstacle support:
+ *   - ซุ้มล้อถูกจำลองเป็น "กล่องที่วางอยู่ก่อนแล้ว" ตั้งแต่เริ่มต้น
+ *   - algorithm จะไม่วางสินค้าทับซุ้มล้อ แต่วางเหนือซุ้มล้อ (z ≥ obstacle.height) ได้
+ *   - มี deduplicateSpaces() เพื่อป้องกันบั๊ก duplicate spaces ที่ทำให้ availableSpaces = 0
  */
 
-import { Box3D, CargoItem, TruckType, PackedItem, BinPackingResult } from './types';
+import { Box3D, CargoItem, TruckType, TruckObstacle, PackedItem, BinPackingResult } from './types';
 
 interface Space3D {
   x: number;
@@ -32,6 +37,172 @@ interface PlacedBox {
   height: number;
   cargoIndex: number;
   itemIndex: number;
+}
+
+/**
+ * ลบพื้นที่ว่างที่ซ้ำกันทุกมิติออก
+ * ป้องกันบั๊ก: เมื่อประมวลผลซุ้มล้อ 2 อัน แต่ละอันสร้าง sub-space เหมือนกัน
+ * แล้ว isSpaceInside() จะเช็คว่า A อยู่ใน B และ B อยู่ใน A → ลบทั้งคู่ทิ้ง → availableSpaces = 0
+ */
+function deduplicateSpaces(spaces: Space3D[]): Space3D[] {
+  const seen = new Set<string>();
+  return spaces.filter(s => {
+    const key = `${s.x.toFixed(2)},${s.y.toFixed(2)},${s.z.toFixed(2)},${s.width.toFixed(2)},${s.length.toFixed(2)},${s.height.toFixed(2)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Check if space is fully inside another space
+function isSpaceInside(inner: Space3D, outer: Space3D): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.z >= outer.z &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.length <= outer.y + outer.length &&
+    inner.z + inner.height <= outer.z + outer.height
+  );
+}
+
+/**
+ * ประมวลผล obstacles (ซุ้มล้อ) ล่วงหน้า — แปลงพื้นที่รถทั้งหมดให้เป็นช่องว่างที่ไม่ทับซุ้มล้อ
+ * ทำงานโดย: สำหรับแต่ละ obstacle จะแบ่งแต่ละ available space ที่ทับซุ้มล้อออกเป็น sub-spaces
+ * รอบ ๆ ซุ้มล้อ (ขวา/หน้า/บน) แล้วเก็บเฉพาะช่องที่ไม่ทับซุ้มล้อ
+ */
+function processObstacles(
+  initialSpace: Space3D,
+  obstacles: TruckObstacle[]
+): { spaces: Space3D[]; placedObstacles: PlacedBox[] } {
+  if (!obstacles || obstacles.length === 0) {
+    return { spaces: [initialSpace], placedObstacles: [] };
+  }
+
+  // แปลง obstacles เป็น PlacedBox (cargoIndex = -1, itemIndex = -1 คือ obstacle)
+  const placedObstacles: PlacedBox[] = obstacles.map((obs, idx) => ({
+    x: obs.x,
+    y: obs.y,
+    z: obs.z,
+    width: obs.width,
+    length: obs.length,
+    height: obs.height,
+    cargoIndex: -1,
+    itemIndex: -100 - idx, // ใช้ index ติดลบเพื่อกันชนกับ item จริง
+  }));
+
+  let spaces: Space3D[] = [initialSpace];
+
+  // สำหรับแต่ละ obstacle จะแบ่ง spaces ที่ทับมันออก
+  for (const obs of placedObstacles) {
+    const newSpaces: Space3D[] = [];
+
+    for (const space of spaces) {
+      // ตรวจสอบว่า space นี้ทับ obstacle หรือไม่
+      const overlapX = space.x < obs.x + obs.width && space.x + space.width > obs.x;
+      const overlapY = space.y < obs.y + obs.length && space.y + space.length > obs.y;
+      const overlapZ = space.z < obs.z + obs.height && space.z + space.height > obs.z;
+
+      if (!overlapX || !overlapY || !overlapZ) {
+        // ไม่ทับกัน → เก็บ space เดิมไว้
+        newSpaces.push(space);
+        continue;
+      }
+
+      // ทับกัน → แบ่ง space ออกเป็น sub-spaces รอบ ๆ obstacle (Guillotine cut)
+      // 1) พื้นที่ด้านขวาของ obstacle (ในแกน X)
+      const rightW = space.x + space.width - (obs.x + obs.width);
+      if (rightW > 0) {
+        newSpaces.push({
+          x: obs.x + obs.width,
+          y: space.y,
+          z: space.z,
+          width: rightW,
+          length: space.length,
+          height: space.height,
+        });
+      }
+      // 2) พื้นที่ด้านซ้ายของ obstacle (ในแกน X) — สำคัญเพราะ obstacle อาจไม่ชิดผนังซ้าย
+      const leftW = obs.x - space.x;
+      if (leftW > 0) {
+        newSpaces.push({
+          x: space.x,
+          y: space.y,
+          z: space.z,
+          width: leftW,
+          length: space.length,
+          height: space.height,
+        });
+      }
+      // 3) พื้นที่ด้านหน้าของ obstacle (ในแกน Y — ฝั่งปลายรถ)
+      const frontL = space.y + space.length - (obs.y + obs.length);
+      if (frontL > 0) {
+        newSpaces.push({
+          x: space.x,
+          y: obs.y + obs.length,
+          z: space.z,
+          width: space.width,
+          length: frontL,
+          height: space.height,
+        });
+      }
+      // 4) พื้นที่ด้านหลังของ obstacle (ในแกน Y — ฝั่งห้องโดยสาร)
+      const backL = obs.y - space.y;
+      if (backL > 0) {
+        newSpaces.push({
+          x: space.x,
+          y: space.y,
+          z: space.z,
+          width: space.width,
+          length: backL,
+          height: space.height,
+        });
+      }
+      // 5) พื้นที่เหนือ obstacle (ในแกน Z — วางทับบนซุ้มล้อได้)
+      const topH = space.z + space.height - (obs.z + obs.height);
+      if (topH > 0) {
+        newSpaces.push({
+          x: space.x,
+          y: space.y,
+          z: obs.z + obs.height,
+          width: space.width,
+          length: space.length,
+          height: topH,
+        });
+      }
+      // 6) พื้นที่ใต้ obstacle (ในแกน Z — ไม่ควรเกิดเพราะ obstacle ปกติวางบนพื้น z=0)
+      const bottomH = obs.z - space.z;
+      if (bottomH > 0) {
+        newSpaces.push({
+          x: space.x,
+          y: space.y,
+          z: space.z,
+          width: space.width,
+          length: space.length,
+          height: bottomH,
+        });
+      }
+    }
+
+    // deduplicate + ลบ spaces ที่ยังทับ obstacle ตัวเดิมหรือ obstacle ก่อนหน้า
+    spaces = deduplicateSpaces(newSpaces).filter(s =>
+      placedObstacles.every(po => {
+        const oX = s.x < po.x + po.width && s.x + s.width > po.x;
+        const oY = s.y < po.y + po.length && s.y + s.length > po.y;
+        const oZ = s.z < po.z + po.height && s.z + s.height > po.z;
+        return !(oX && oY && oZ);
+      })
+    );
+  }
+
+  // ลบ spaces ที่อยู่ในอีก space หนึ่ง (redundant)
+  spaces = deduplicateSpaces(spaces).filter((space, idx, arr) => {
+    return !arr.some((other, otherIdx) =>
+      otherIdx !== idx && isSpaceInside(space, other)
+    );
+  });
+
+  return { spaces, placedObstacles };
 }
 
 // All 6 possible rotations of a 3D box (deduplicated for cubes/square prisms)
@@ -130,18 +301,6 @@ function generateSubSpaces(
   return subSpaces;
 }
 
-// Check if space is fully inside another space
-function isSpaceInside(inner: Space3D, outer: Space3D): boolean {
-  return (
-    inner.x >= outer.x &&
-    inner.y >= outer.y &&
-    inner.z >= outer.z &&
-    inner.x + inner.width <= outer.x + outer.width &&
-    inner.y + inner.length <= outer.y + outer.length &&
-    inner.z + inner.height <= outer.z + outer.height
-  );
-}
-
 // Main 3D Bin Packing function
 export function performBinPacking(
   cargoItems: CargoItem[],
@@ -186,12 +345,16 @@ export function performBinPacking(
   // Sort by volume descending (First Fit Decreasing)
   itemsToPack.sort((a, b) => b.volume - a.volume);
 
-  // Initialize available spaces with the entire truck
-  let availableSpaces: Space3D[] = [
-    { x: 0, y: 0, z: 0, width: effectiveW, length: effectiveL, height: effectiveH },
-  ];
+  // ===== Process obstacles (wheel arches) =====
+  // ซุ้มล้อจะถูกจำลองเป็น "กล่องที่วางอยู่ก่อนแล้ว" และพื้นที่รถจะถูกตัดรอบ ๆ ซุ้มล้อ
+  const initialSpace: Space3D = { x: 0, y: 0, z: 0, width: effectiveW, length: effectiveL, height: effectiveH };
+  const { spaces: initialSpaces, placedObstacles } = processObstacles(initialSpace, truck.obstacles || []);
 
-  const placedBoxes: PlacedBox[] = [];
+  // Initialize available spaces (หลังตัดซุ้มล้อแล้ว)
+  let availableSpaces: Space3D[] = initialSpaces;
+
+  // placedBoxes เริ่มจาก obstacles ที่วางอยู่ก่อนแล้ว (ซุ้มล้อ)
+  const placedBoxes: PlacedBox[] = [...placedObstacles];
   const packedItems: PackedItem[] = [];
   const unfittedItems: { cargoIndex: number; itemIndex: number; reason: string }[] = [];
   let utilizedCBM = 0;
@@ -250,13 +413,13 @@ export function performBinPacking(
         availableSpaces.push(...subSpaces);
 
         // Clean up: remove spaces that are inside other spaces or overlap with placed boxes
-        availableSpaces = availableSpaces.filter(space => {
-          // Must not overlap any placed box
+        availableSpaces = deduplicateSpaces(availableSpaces).filter(space => {
+          // Must not overlap any placed box (รวม obstacles)
           return hasNoOverlap(space, placedBoxes);
         });
 
         // Remove redundant spaces (spaces completely inside other spaces)
-        availableSpaces = availableSpaces.filter((space, idx, arr) => {
+        availableSpaces = deduplicateSpaces(availableSpaces).filter((space, idx, arr) => {
           return !arr.some((other, otherIdx) =>
             otherIdx !== idx && isSpaceInside(space, other)
           );

@@ -67,6 +67,31 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     depthFromDoor: number; // cm from rear door
   }
 
+  // ===== Wheel arch (obstacle) visual data =====
+  // แปลง obstacles ให้เป็นพิกัดภาพ (Y flipped เหมือนสินค้า)
+  interface ArchInfo {
+    x: number; y: number; z: number;          // visual position
+    w: number; l: number; h: number;
+    label: string;
+    origX: number; origY: number; origZ: number; // cm ก่อน scale (สำหรับแสดงใน top view)
+    origW: number; origL: number; origH: number;
+  }
+  const arches: ArchInfo[] = (truck.obstacles || []).map(obs => {
+    const visualY = (truckL - obs.y - obs.length) * scale;
+    return {
+      x: obs.x * scale,
+      y: visualY,
+      z: obs.z * scale,
+      w: obs.width * scale,
+      l: obs.length * scale,
+      h: obs.height * scale,
+      label: obs.label || 'ซุ้มล้อ',
+      origX: obs.x, origY: obs.y, origZ: obs.z,
+      origW: obs.width, origL: obs.length, origH: obs.height,
+    };
+  });
+  const hasArches = arches.length > 0;
+
   const placements: PlacementInfo[] = result.items.map(item => {
     const cIdx = cargoColorMap.get(item.cargoIndex) ?? 0;
     const cargoItem = cargoItems[item.cargoIndex];
@@ -136,6 +161,29 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           สูง {truck.dimensions.height} ม.
         </text>
 
+        {/* Wheel arches (ซุ้มล้อ) — วาดก่อนสินค้าเพื่อให้สินค้าที่อยู่เหนือซุ้มล้อทับบน */}
+        {hasArches && arches.map((arch, idx) => {
+          const x = pad + arch.x;
+          const y = pad + (sH - arch.z - arch.h); // SVG y is top-down, z is bottom-up
+          return (
+            <g key={`arch-${idx}`}>
+              <rect x={x} y={y} width={arch.w} height={arch.h}
+                fill="#9CA3AF" fillOpacity={0.85}
+                stroke="#4B5563" strokeWidth="2" rx="2"
+                strokeDasharray="3,2" />
+              {/* Diagonal stripes pattern to indicate "no-place" zone */}
+              <line x1={x} y1={y} x2={x + arch.w} y2={y + arch.h} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              <line x1={x + arch.w} y1={y} x2={x} y2={y + arch.h} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              {arch.w > 18 && arch.h > 12 && (
+                <text x={x + arch.w / 2} y={y + arch.h / 2 + 2} textAnchor="middle"
+                  className="text-[7px] font-bold fill-gray-700">
+                  {arch.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {/* Items - deeper items first, closer items overlay on top */}
         {sorted.map((p, idx) => {
           const color = CARGO_COLORS[p.colorIdx];
@@ -201,6 +249,28 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           🚛 หน้ารถ (ยาว {truck.dimensions.length} ม.)
         </text>
 
+        {/* Wheel arches (ซุ้มล้อ) — top view shows width × length */}
+        {hasArches && arches.map((arch, idx) => {
+          const x = pad + arch.x;
+          const y = pad + arch.y;
+          return (
+            <g key={`arch-top-${idx}`}>
+              <rect x={x} y={y} width={arch.w} height={arch.l}
+                fill="#9CA3AF" fillOpacity={0.85}
+                stroke="#4B5563" strokeWidth="2" rx="2"
+                strokeDasharray="3,2" />
+              <line x1={x} y1={y} x2={x + arch.w} y2={y + arch.l} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              <line x1={x + arch.w} y1={y} x2={x} y2={y + arch.l} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              {arch.w > 18 && arch.l > 18 && (
+                <text x={x + arch.w / 2} y={y + arch.l / 2 + 2} textAnchor="middle"
+                  className="text-[6px] font-bold fill-gray-700">
+                  {arch.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {placements.map((p, idx) => {
           const color = CARGO_COLORS[p.colorIdx];
           // Height-based opacity: taller items more opaque
@@ -260,6 +330,31 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
         <text x={pad + sL / 2} y={pad + sH + 20} textAnchor="middle" className="text-[10px] fill-gray-400">
           ยาว {truck.dimensions.length} ม.
         </text>
+
+        {/* Wheel arches (ซุ้มล้อ) — side view shows length × height */}
+        {/* หมายเหตุ: รถกระบะมี 2 ซุ้มล้อ (ซ้าย+ขวา) แต่ใน side view เห็นเป็น 1 กล่องเพราะทับซ้อนกันในแกน X */}
+        {hasArches && arches.length > 0 && (() => {
+          // ใช้ซุ้มล้ออันแรกเป็นตัวแทน (เพราะ side view มองเห็นเป็นเส้นเดียวกัน)
+          const arch = arches[0];
+          const x = pad + arch.y; // y=0 is the door (left side)
+          const y = pad + (sH - arch.z - arch.h);
+          return (
+            <g key="arch-side">
+              <rect x={x} y={y} width={arch.l} height={arch.h}
+                fill="#9CA3AF" fillOpacity={0.85}
+                stroke="#4B5563" strokeWidth="2" rx="2"
+                strokeDasharray="3,2" />
+              <line x1={x} y1={y} x2={x + arch.l} y2={y + arch.h} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              <line x1={x + arch.l} y1={y} x2={x} y2={y + arch.h} stroke="#6B7280" strokeWidth="1" opacity="0.5" />
+              {arch.l > 28 && arch.h > 14 && (
+                <text x={x + arch.l / 2} y={y + arch.h / 2 + 2} textAnchor="middle"
+                  className="text-[6px] font-bold fill-gray-700">
+                  ซุ้มล้อ (2 ข้าง)
+                </text>
+              )}
+            </g>
+          );
+        })()}
 
         {placements.map((p, idx) => {
           const color = CARGO_COLORS[p.colorIdx];
@@ -437,6 +532,43 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           );
         })}
 
+        {/* Wheel arches as 3D boxes (วาดหลังสินค้าเพื่อให้มองเห็นชัด) */}
+        {hasArches && arches.map((arch, idx) => {
+          const x = arch.x, y = arch.y, z = arch.z, w = arch.w, l = arch.l, h = arch.h;
+          const topFace = [
+            project(x, y, z + h),
+            project(x + w, y, z + h),
+            project(x + w, y + l, z + h),
+            project(x, y + l, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+          const leftFace = [
+            project(x, y, z),
+            project(x + w, y, z),
+            project(x + w, y, z + h),
+            project(x, y, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+          const rightFace = [
+            project(x + w, y, z),
+            project(x + w, y + l, z),
+            project(x + w, y + l, z + h),
+            project(x + w, y, z + h),
+          ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
+          const labelPos = project(x + w / 2, y + l / 2, z + h);
+          return (
+            <g key={`arch-3d-${idx}`}>
+              <polygon points={leftFace} fill="#9CA3AF" fillOpacity={0.9} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />
+              <polygon points={rightFace} fill="#6B7280" fillOpacity={0.7} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />
+              <polygon points={topFace} fill="#D1D5DB" fillOpacity={0.85} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />
+              {showLabels && w > 8 && l > 8 && (
+                <text x={labelPos[0] + offsetX} y={labelPos[1] + offsetY - 2}
+                  textAnchor="middle" className="text-[6px] font-bold fill-gray-700">
+                  {arch.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {/* Dimension labels */}
         <text x={project(sW / 2, sL, -10)[0] + offsetX} y={project(sW / 2, sL, -10)[1] + offsetY}
           textAnchor="middle" className="text-[9px] fill-gray-400">
@@ -599,6 +731,12 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           <p>
             <strong>พื้นที่ใช้ได้จริง:</strong> คูณด้วย usableSpace {truck.usableSpace}% (คิดจากทุกมิติ)
           </p>
+          {hasArches && (
+            <p>
+              <strong>ซุ้มล้อ (Wheel Arch):</strong> มี {arches.length} จุด — ระบบจะไม่วางสินค้าทับซุ้มล้อ
+              แต่วางเหนือซุ้มล้อได้ (ที่ความสูง ≥ {arches[0].origH} ซม. จากพื้น)
+            </p>
+          )}
           <p className="text-blue-500 italic">
             ⚠️ ผลลัพธ์เป็นการประมาณการ สินค้าจริงอาจวางได้ต่างเล็กน้อยขึ้นอยู่กับรูปทรงและการจัดเรียงจริง
           </p>

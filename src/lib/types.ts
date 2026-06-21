@@ -22,6 +22,25 @@ export interface RateData {
   };
 }
 
+/**
+ * Wheel arch (ซุ้มล้อ) — พื้นที่ต้องห้ามวางของ
+ * หน่วยเป็น เซนติเมตร (เหมือน cargo)
+ *
+ * พิกัด (x, y, z):
+ *   x = ระยะจากผนังด้านซ้าย (แกนกว้าง)
+ *   y = ระยะจากผนังด้านหน้ารถ (ฝั่งห้องโดยสาร) (แกนยาว)
+ *   z = ระยะจากพื้นกระบะ (แกนสูง)
+ */
+export interface TruckObstacle {
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  length: number;
+  height: number;
+  label?: string;
+}
+
 export interface TruckType {
   id: string;
   name: string;
@@ -31,6 +50,8 @@ export interface TruckType {
   dimensions: { width: number; length: number; height: number };
   usableSpace: number;
   jobKey: string;
+  /** ซุ้มล้อหรือสิ่งกีดขวางอื่น ๆ (optional — รถตู้พื้นเรียบไม่มี) */
+  obstacles?: TruckObstacle[];
 }
 
 export interface CargoItem {
