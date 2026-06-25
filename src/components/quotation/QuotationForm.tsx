@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { truckTypes } from '@/lib/truck-data';
 import { LABOR_COST } from '@/lib/oil-price-api';
-import { formatThaiDate, getTodayISO, getTodayThai } from '@/lib/date-utils';
+import { getTodayISO } from '@/lib/date-utils';
 import { useToast } from '@/hooks/use-toast';
 import QuotationPreview from './QuotationPreview';
-import type { RateData, TruckType, CargoItem } from '@/lib/types';
+import { generatePdf } from '@/lib/quotation-pdf';
+import type { CargoItem, TruckType } from '@/lib/types';
 
 // ===== Types =====
 export interface QuotationItem {
@@ -54,7 +55,7 @@ interface QuotationFormProps {
   distance: string;
   currentOilPrice: number;
   calculatedPrice: number | null;
-  rateData: RateData | null;
+  rateData: Record<string, { oil_ranges: { min: number; max: number }[]; data: { dist_min: number; dist_max: number; prices: number[] }[] }> | null;
   availableJobs: string[];
   selectedTruck: TruckType;
   cargoItems: CargoItem[];
@@ -72,6 +73,40 @@ const EXPIRY_OPTIONS = [
   { value: 30, label: '30 วัน' },
 ];
 
+/** สร้างเลขที่ใบเสนอราคา (ไม่ใช้ database) */
+function generateLocalQuotationNumber(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `QT-${year}-${month}${day}-${random}`;
+}
+
+/** Encode QuotationData เป็น base64 URL-safe string */
+function encodeQuotationData(data: QuotationData): string {
+  const json = JSON.stringify(data);
+  if (typeof window !== 'undefined') {
+    return btoa(unescape(encodeURIComponent(json)));
+  }
+  return Buffer.from(json).toString('base64');
+}
+
+/** Decode base64 URL-safe string เป็น QuotationData */
+export function decodeQuotationData(encoded: string): QuotationData | null {
+  try {
+    let json: string;
+    if (typeof window !== 'undefined') {
+      json = decodeURIComponent(escape(atob(encoded)));
+    } else {
+      json = Buffer.from(encoded, 'base64').toString('utf-8');
+    }
+    return JSON.parse(json) as QuotationData;
+  } catch {
+    return null;
+  }
+}
+
 export default function QuotationForm({
   selectedJob,
   distance,
@@ -87,6 +122,7 @@ export default function QuotationForm({
   destinationName,
 }: QuotationFormProps) {
   const { toast } = useToast();
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // ===== Form State =====
   const [customerName, setCustomerName] = useState('');
@@ -98,7 +134,6 @@ export default function QuotationForm({
   const [expiryDays, setExpiryDays] = useState(7);
   const [notes, setNotes] = useState('');
   const [trips, setTrips] = useState<QuotationTrip[]>(() => {
-    // Initialize with a pre-filled trip if we already have calculated price
     if (calculatedPrice !== null) {
       const price = calculatedPrice || 0;
       const labor = includeLabor ? LABOR_COST : 0;
@@ -125,24 +160,10 @@ export default function QuotationForm({
     }
     return [];
   });
-  const [nextQuotationNumber, setNextQuotationNumber] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [quotationNumber, setQuotationNumber] = useState(generateLocalQuotationNumber);
   const [showPreview, setShowPreview] = useState(false);
-  const [createdQuotation, setCreatedQuotation] = useState<QuotationData | null>(null);
-
-  // ===== Fetch next quotation number =====
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/quotations/next-number')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (!cancelled && data?.nextNumber) {
-          setNextQuotationNumber(data.nextNumber);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
 
   // ===== Convert cargoItems to QuotationItem[] =====
   const cargoToQuotationItems = useCallback((): QuotationItem[] => {
@@ -208,7 +229,6 @@ export default function QuotationForm({
       if (t.id !== id) return t;
       const updated = { ...t, [field]: value };
 
-      // If truck type changed, update truck details
       if (field === 'truckTypeId') {
         const truck = truckTypes.find(tr => tr.id === value);
         if (truck) {
@@ -218,7 +238,6 @@ export default function QuotationForm({
         }
       }
 
-      // Recalculate trip total
       if (['basePrice', 'laborCost', 'numberOfTrips'].includes(field)) {
         const numTrips = field === 'numberOfTrips' ? Number(value) || 1 : updated.numberOfTrips;
         updated.numberOfTrips = numTrips;
@@ -233,7 +252,6 @@ export default function QuotationForm({
   const calculateTripPrice = (trip: QuotationTrip): number => {
     if (!rateData || trip.distance <= 0) return 0;
 
-    // Find the job key matching the truck
     const truck = truckTypes.find(t => t.id === trip.truckTypeId);
     const jobKey = truck?.jobKey || selectedJob;
     const jobData = rateData[jobKey];
@@ -273,7 +291,6 @@ export default function QuotationForm({
     return 0;
   };
 
-  // Auto-calculate price when trip details change
   const recalculateTripPrice = (id: string) => {
     setTrips(prevTrips => prevTrips.map(t => {
       if (t.id !== id) return t;
@@ -286,9 +303,9 @@ export default function QuotationForm({
   // ===== Total Price =====
   const totalPrice = trips.reduce((sum, t) => sum + t.tripTotalPrice, 0);
 
-  // ===== Preview Data =====
-  const previewData: QuotationData | null = showPreview ? {
-    quotationNumber: nextQuotationNumber || 'QT-XXXX-0001',
+  // ===== Build preview data =====
+  const buildPreviewData = (): QuotationData => ({
+    quotationNumber,
     customerName,
     customerPhone,
     customerEmail,
@@ -300,143 +317,51 @@ export default function QuotationForm({
     trips,
     totalPrice,
     createdAt: getTodayISO(),
-  } : null;
+  });
 
-  // ===== Submit =====
-  const handleSubmit = async () => {
-    // Validation
-    if (!customerName.trim()) {
-      toast({ title: 'กรุณาระบุชื่อลูกค้า', variant: 'destructive' });
+  // ===== Preview =====
+  const handlePreview = () => {
+    if (!customerName.trim() || !origin.trim() || !destination.trim()) {
+      toast({ title: 'กรุณากรอกข้อมูลที่จำเป็น', description: 'ชื่อลูกค้า, ต้นทาง, ปลายทาง', variant: 'destructive' });
       return;
     }
-    if (!origin.trim()) {
-      toast({ title: 'กรุณาระบุต้นทาง', variant: 'destructive' });
-      return;
-    }
-    if (!destination.trim()) {
-      toast({ title: 'กรุณาระบุปลายทาง', variant: 'destructive' });
-      return;
-    }
-    if (trips.length === 0) {
-      toast({ title: 'กรุณาเพิ่มอย่างน้อย 1 เที่ยว', variant: 'destructive' });
-      return;
-    }
-    if (totalPrice <= 0) {
-      toast({ title: 'ราคารวมต้องมากกว่า 0', variant: 'destructive' });
-      return;
-    }
-    if (!adminApiKey) {
-      toast({ title: 'กรุณาใส่รหัสแอดมิน', description: 'ต้องใส่ API Key ในแท็บคำนวณราคาก่อนสร้างใบเสนอราคา', variant: 'destructive' });
-      return;
-    }
+    setShowPreview(true);
+    setShareLink(null);
+  };
 
-    setIsSubmitting(true);
+  // ===== Generate PDF =====
+  const handleGeneratePdf = async () => {
+    if (!previewRef.current) return;
+    setIsGeneratingPdf(true);
     try {
-      const res = await fetch('/api/quotations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': adminApiKey,
-        },
-        body: JSON.stringify({
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim() || undefined,
-          customerEmail: customerEmail.trim() || undefined,
-          customerAddress: customerAddress.trim() || undefined,
-          origin: origin.trim(),
-          destination: destination.trim(),
-          expiryDays,
-          notes: notes.trim() || undefined,
-          trips: trips.map((t, index) => ({
-            tripIndex: index,
-            truckTypeId: t.truckTypeId,
-            truckName: t.truckName,
-            truckCBM: t.truckCBM,
-            truckMaxWeight: t.truckMaxWeight,
-            distance: t.distance,
-            dieselPrice: t.dieselPrice,
-            laborCost: t.laborCost,
-            basePrice: t.basePrice,
-            tripTotalPrice: t.tripTotalPrice,
-            utilizedCBM: 0,
-            utilizationPct: 0,
-            totalWeight: 0,
-            items: t.items || [],
-          })),
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 401) {
-          toast({ title: 'ไม่มีสิทธิ์', description: 'รหัสแอดมินไม่ถูกต้อง', variant: 'destructive' });
-        } else {
-          toast({ title: 'สร้างไม่สำเร็จ', description: data.error || 'เกิดข้อผิดพลาด', variant: 'destructive' });
-        }
-        return;
-      }
-
-      const data = await res.json();
-      const quotation = data.quotation;
-
-      const createdData: QuotationData = {
-        quotationNumber: quotation.quotationNumber,
-        customerName: quotation.customerName,
-        customerPhone: quotation.customerPhone || '',
-        customerEmail: quotation.customerEmail || '',
-        customerAddress: quotation.customerAddress || '',
-        origin: quotation.origin,
-        destination: quotation.destination,
-        expiryDays: quotation.expiryDays,
-        notes: quotation.notes || '',
-        trips: quotation.trips.map((t: Record<string, unknown>) => ({
-          id: t.id as string,
-          truckTypeId: t.truckTypeId as string,
-          truckName: t.truckName as string,
-          truckCBM: t.truckCBM as number,
-          truckMaxWeight: t.truckMaxWeight as number,
-          distance: t.distance as number,
-          dieselPrice: t.dieselPrice as number,
-          basePrice: t.basePrice as number,
-          laborCost: t.laborCost as number,
-          tripTotalPrice: t.tripTotalPrice as number,
-          numberOfTrips: 1,
-          items: Array.isArray(t.items) ? (t.items as Record<string, unknown>[]).map((item) => ({
-            name: item.name as string || undefined,
-            width: item.width as number,
-            length: item.length as number,
-            height: item.height as number,
-            quantity: item.quantity as number,
-            weight: item.weight as number,
-          })) : [],
-        })),
-        totalPrice: quotation.totalPrice,
-        createdAt: quotation.createdAt,
-      };
-
-      setCreatedQuotation(createdData);
-      setShowPreview(true);
-      toast({ title: 'สร้างใบเสนอราคาสำเร็จ', description: `เลขที่ ${quotation.quotationNumber}` });
-
-      // Refresh next quotation number
-      fetch('/api/quotations/next-number')
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.nextNumber) setNextQuotationNumber(d.nextNumber); })
-        .catch(() => {});
-
-    } catch {
-      toast({ title: 'เกิดข้อผิดพลาด', description: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', variant: 'destructive' });
+      await generatePdf(previewRef.current, `${quotationNumber}.pdf`);
+      toast({ title: 'สร้าง PDF สำเร็จ' });
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast({ title: 'สร้าง PDF ไม่สำเร็จ', description: 'กรุณาลองอีกครั้ง', variant: 'destructive' });
     } finally {
-      setIsSubmitting(false);
+      setIsGeneratingPdf(false);
     }
   };
 
-  // ===== Copy link =====
-  const copyShareLink = () => {
-    if (!createdQuotation) return;
-    const link = `${window.location.origin}/quotation/${createdQuotation.quotationNumber}`;
+  // ===== Generate Share Link =====
+  const handleGenerateShareLink = () => {
+    const data = buildPreviewData();
+    const encoded = encodeQuotationData(data);
+    const link = `${window.location.origin}/quotation?q=${encoded}`;
+    setShareLink(link);
     navigator.clipboard.writeText(link).then(() => {
       toast({ title: 'คัดลอกลิงก์สำเร็จ', description: link });
+    }).catch(() => {
+      toast({ title: 'ลิงก์พร้อมแชร์แล้ว', description: 'คัดลอกลิงก์ด้านล่างส่งให้ลูกค้า' });
+    });
+  };
+
+  // ===== Copy Share Link =====
+  const copyShareLink = () => {
+    if (!shareLink) return;
+    navigator.clipboard.writeText(shareLink).then(() => {
+      toast({ title: 'คัดลอกลิงก์สำเร็จ' });
     }).catch(() => {
       toast({ title: 'คัดลอกไม่สำเร็จ', variant: 'destructive' });
     });
@@ -444,8 +369,8 @@ export default function QuotationForm({
 
   // ===== Reset form =====
   const resetForm = () => {
-    setCreatedQuotation(null);
     setShowPreview(false);
+    setShareLink(null);
     setCustomerName('');
     setCustomerPhone('');
     setCustomerEmail('');
@@ -455,28 +380,41 @@ export default function QuotationForm({
     setExpiryDays(7);
     setNotes('');
     setTrips([]);
+    setQuotationNumber(generateLocalQuotationNumber());
   };
 
   // ===== If preview is showing, render the preview =====
-  if (showPreview && (createdQuotation || previewData)) {
-    const data = createdQuotation || previewData!;
+  if (showPreview) {
+    const previewData = buildPreviewData();
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2 no-print">
           <button
-            onClick={() => window.print()}
-            className="px-4 py-2 bg-slate-800 text-white rounded-lg font-medium hover:bg-slate-700 transition text-sm"
+            onClick={handleGeneratePdf}
+            disabled={isGeneratingPdf}
+            className="px-4 py-2 bg-slate-800 text-white rounded-lg font-medium hover:bg-slate-700 transition text-sm disabled:opacity-50"
           >
-            🖨️ พิมพ์ใบเสนอราคา
+            {isGeneratingPdf ? (
+              <span className="flex items-center gap-2">
+                <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+                กำลังสร้าง PDF...
+              </span>
+            ) : (
+              '📄 ดาวน์โหลด PDF'
+            )}
           </button>
-          {createdQuotation && (
-            <button
-              onClick={copyShareLink}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition text-sm"
-            >
-              🔗 คัดลอกลิงก์
-            </button>
-          )}
+          <button
+            onClick={handleGenerateShareLink}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition text-sm"
+          >
+            🔗 แชร์ลิงก์ให้ลูกค้า
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition text-sm"
+          >
+            🖨️ พิมพ์
+          </button>
           <button
             onClick={resetForm}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition text-sm"
@@ -484,7 +422,30 @@ export default function QuotationForm({
             ➕ สร้างใหม่
           </button>
         </div>
-        <QuotationPreview quotation={data} />
+
+        {/* Share link display */}
+        {shareLink && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 no-print">
+            <p className="text-sm text-emerald-700 font-medium mb-1">ลิงก์แชร์สำหรับลูกค้า:</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={shareLink}
+                className="flex-1 bg-white border border-emerald-300 rounded px-2 py-1 text-xs text-gray-700 font-mono"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <button onClick={copyShareLink} className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-medium hover:bg-emerald-700">
+                คัดลอก
+              </button>
+            </div>
+            <p className="text-xs text-emerald-600 mt-1">ส่งลิงก์นี้ให้ลูกค้าเปิดดูใบเสนอราคาได้เลย</p>
+          </div>
+        )}
+
+        <div ref={previewRef}>
+          <QuotationPreview quotation={previewData} />
+        </div>
       </div>
     );
   }
@@ -503,9 +464,15 @@ export default function QuotationForm({
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 flex items-center justify-between">
             <div>
               <span className="text-sm text-purple-600 font-medium">เลขที่ใบเสนอราคา</span>
-              <p className="text-lg font-bold text-purple-800">{nextQuotationNumber || 'กำลังโหลด...'}</p>
+              <p className="text-lg font-bold text-purple-800">{quotationNumber}</p>
             </div>
-            <span className="text-xs text-purple-500 bg-purple-100 px-2 py-1 rounded">สร้างอัตโนมัติ</span>
+            <button
+              onClick={() => setQuotationNumber(generateLocalQuotationNumber())}
+              className="text-xs text-purple-500 bg-purple-100 px-2 py-1 rounded hover:bg-purple-200 transition"
+              title="สุ่มเลขใหม่"
+            >
+              สุ่มใหม่
+            </button>
           </div>
 
           {/* Customer Section */}
@@ -745,30 +712,10 @@ export default function QuotationForm({
           {/* Preview + Submit */}
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
-              onClick={() => {
-                if (!customerName.trim() || !origin.trim() || !destination.trim()) {
-                  toast({ title: 'กรุณากรอกข้อมูลที่จำเป็น', description: 'ชื่อลูกค้า, ต้นทาง, ปลายทาง', variant: 'destructive' });
-                  return;
-                }
-                setShowPreview(true);
-              }}
+              onClick={handlePreview}
               className="flex-1 py-3 bg-gray-200 text-gray-800 rounded-lg font-bold hover:bg-gray-300 transition"
             >
               👁️ ดูตัวอย่าง
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting || trips.length === 0}
-              className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-bold hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 transition"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
-                  กำลังสร้าง...
-                </span>
-              ) : (
-                '📄 สร้างใบเสนอราคา'
-              )}
             </button>
           </div>
         </div>

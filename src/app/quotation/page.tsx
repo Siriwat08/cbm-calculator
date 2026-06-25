@@ -1,88 +1,48 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
 import QuotationPreview from '@/components/quotation/QuotationPreview';
-import type { QuotationData } from '@/components/quotation/QuotationForm';
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
-  DRAFT: { label: 'ร่าง', color: 'text-gray-700', bgColor: 'bg-gray-200' },
-  SENT: { label: 'ส่งแล้ว', color: 'text-blue-700', bgColor: 'bg-blue-100' },
-  ACCEPTED: { label: 'ตกลง', color: 'text-emerald-700', bgColor: 'bg-emerald-100' },
-  REJECTED: { label: 'ปฏิเสธ', color: 'text-red-700', bgColor: 'bg-red-100' },
-  EXPIRED: { label: 'หมดอายุ', color: 'text-orange-700', bgColor: 'bg-orange-100' },
-  CANCELLED: { label: 'ยกเลิก', color: 'text-gray-500', bgColor: 'bg-gray-100' },
-};
+import { decodeQuotationData, type QuotationData } from '@/components/quotation/QuotationForm';
+import { generatePdf } from '@/lib/quotation-pdf';
+import { useRef } from 'react';
 
 function QuotationShareContent() {
   const searchParams = useSearchParams();
-  const quoteId = searchParams.get('id') || searchParams.get('q') || '';
+  const encoded = searchParams.get('q') || '';
   const [quotation, setQuotation] = useState<QuotationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!quoteId) return;
+    if (!encoded) {
+      setError('ไม่พบข้อมูลใบเสนอราคา');
+      setLoading(false);
+      return;
+    }
 
-    let cancelled = false;
-    const fetchQuotation = async () => {
-      try {
-        const listRes = await fetch('/api/quotations?limit=100');
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const found = listData.quotations?.find(
-            (q: { id: string; quotationNumber: string }) =>
-              q.id === quoteId || q.quotationNumber === quoteId
-          );
-          if (found) {
-            const detailRes = await fetch(`/api/quotations/${found.id}`);
-            if (detailRes.ok && !cancelled) {
-              const data = await detailRes.json();
-              const q = data.quotation;
-              setStatus(q.status);
-              setQuotation({
-                quotationNumber: q.quotationNumber,
-                customerName: q.customerName,
-                customerPhone: q.customerPhone || '',
-                customerEmail: q.customerEmail || '',
-                customerAddress: q.customerAddress || '',
-                origin: q.origin,
-                destination: q.destination,
-                expiryDays: q.expiryDays,
-                notes: q.notes || '',
-                trips: q.trips.map((t: Record<string, unknown>) => ({
-                  id: t.id as string,
-                  truckTypeId: t.truckTypeId as string,
-                  truckName: t.truckName as string,
-                  truckCBM: t.truckCBM as number,
-                  truckMaxWeight: t.truckMaxWeight as number,
-                  distance: t.distance as number,
-                  dieselPrice: t.dieselPrice as number,
-                  basePrice: t.basePrice as number,
-                  laborCost: t.laborCost as number,
-                  tripTotalPrice: t.tripTotalPrice as number,
-                  numberOfTrips: 1,
-                })),
-                totalPrice: q.totalPrice,
-                createdAt: q.createdAt,
-              });
-              return;
-            }
-          }
-        }
-        if (!cancelled) setError('ไม่พบใบเสนอราคา');
-      } catch {
-        if (!cancelled) setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
+    const data = decodeQuotationData(encoded);
+    if (data) {
+      setQuotation(data);
+    } else {
+      setError('ข้อมูลใบเสนอราคาไม่ถูกต้อง หรือลิงก์หมดอายุ');
+    }
+    setLoading(false);
+  }, [encoded]);
 
-    fetchQuotation();
-    return () => { cancelled = true; };
-  }, [quoteId]);
+  const handleDownloadPdf = async () => {
+    if (!previewRef.current) return;
+    setIsGeneratingPdf(true);
+    try {
+      await generatePdf(previewRef.current, `${quotation?.quotationNumber || 'ใบเสนอราคา'}.pdf`);
+    } catch (err) {
+      console.error('PDF error:', err);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -107,8 +67,6 @@ function QuotationShareContent() {
     );
   }
 
-  const statusConfig = STATUS_CONFIG[status] || STATUS_CONFIG.DRAFT;
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top Bar */}
@@ -122,12 +80,16 @@ function QuotationShareContent() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusConfig.color} ${statusConfig.bgColor}`}>
-              {statusConfig.label}
-            </span>
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isGeneratingPdf}
+              className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700 transition disabled:opacity-50"
+            >
+              {isGeneratingPdf ? 'กำลังสร้าง PDF...' : '📄 ดาวน์โหลด PDF'}
+            </button>
             <button
               onClick={() => window.print()}
-              className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700 transition"
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition"
             >
               🖨️ พิมพ์
             </button>
@@ -137,7 +99,9 @@ function QuotationShareContent() {
 
       {/* Quotation Content */}
       <div className="max-w-4xl mx-auto py-6 px-4">
-        <QuotationPreview quotation={quotation} />
+        <div ref={previewRef}>
+          <QuotationPreview quotation={quotation} />
+        </div>
       </div>
 
       {/* Footer */}

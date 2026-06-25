@@ -2,17 +2,18 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
-import { truckTypes, getTruckByJobKey } from '@/lib/truck-data';
+import { truckTypes, getTruckByJobKey, getTruckGrossCBM, getTruckNetCBM, getTruckObstacleCBM } from '@/lib/truck-data';
 import { FALLBACK_DIESEL_PRICE, LABOR_COST, CARGO_LIMITS } from '@/lib/oil-price-api';
 import { performBinPacking, applyWeightConstraint } from '@/lib/bin-packing';
 import { formatDisplayDate } from '@/lib/date-utils';
 import BinPackingVisualization from '@/components/BinPackingVisualization';
 import { useToast } from '@/hooks/use-toast';
+import QuotationForm from '@/components/quotation/QuotationForm';
 import type { OilPrice, RateData, TruckType, CargoItem, BinPackingResult } from '@/lib/types';
 
 export default function Home() {
   // ===== Tab State =====
-  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'compare'>('cbm');
+  const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'compare' | 'quotation'>('cbm');
 
   // ===== Oil Price State =====
   const [currentOilPrice, setCurrentOilPrice] = useState<number>(FALLBACK_DIESEL_PRICE);
@@ -606,6 +607,9 @@ export default function Home() {
           <button onClick={() => setActiveTab('compare')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all text-sm ${activeTab === 'compare' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             🚚 เปรียบเทียบแผน
           </button>
+          <button onClick={() => setActiveTab('quotation')} className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all text-sm ${activeTab === 'quotation' ? 'bg-slate-800 text-white shadow' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            📄 ใบเสนอราคา
+          </button>
         </div>
       </div>
 
@@ -644,7 +648,12 @@ export default function Home() {
                     <div className="p-3">
                       <h3 className="font-bold text-gray-800">{truck.name}</h3>
                       <p className="text-sm text-gray-600">CBM: {truck.cbm} | น้ำหนัก: {truck.maxWeight.toLocaleString()} kg</p>
-                      <p className="text-xs text-gray-400 mt-1">ขนาด: {truck.dimensions.width}×{truck.dimensions.length}×{truck.dimensions.height} ม.</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        ขนาด: {truck.dimensions.width}×{truck.dimensions.length}×{truck.dimensions.height} ม.
+                        <span className="ml-2">Gross: {getTruckGrossCBM(truck).toFixed(3)} ม³</span>
+                        {getTruckObstacleCBM(truck) > 0 && <span className="text-red-400 ml-1">(-{getTruckObstacleCBM(truck).toFixed(3)} ซุ้มล้อ)</span>}
+                        <span className="ml-1">Net: {getTruckNetCBM(truck).toFixed(3)} ม³</span>
+                      </p>
                       <button onClick={() => goToPriceCalculator(truck)} className="mt-2 w-full py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg font-medium hover:from-emerald-600 hover:to-emerald-700 transition text-sm">
                         💰 คำนวณราคา
                       </button>
@@ -1501,6 +1510,21 @@ export default function Home() {
               </>
             )}
           </div>
+        )}
+        {/* ===== Quotation Tab ===== */}
+        {activeTab === 'quotation' && (
+          <QuotationForm
+            selectedJob={selectedJob}
+            distance={distance}
+            currentOilPrice={currentOilPrice}
+            calculatedPrice={calculatedPrice}
+            rateData={rateData}
+            availableJobs={availableJobs}
+            selectedTruck={selectedTruck}
+            cargoItems={cargoItems}
+            includeLabor={includeLabor}
+            adminApiKey={adminApiKey}
+          />
         )}
       </main>
 

@@ -65,3 +65,22 @@ export function getTruckByJobKey(jobKey: string): TruckType | undefined {
 export function getJobKeyByTruckId(truckId: string): string | undefined {
   return truckTypes.find(t => t.id === truckId)?.jobKey;
 }
+
+// ===== Gross / Net / Obstacle CBM (จากแอปลูกค้า MESPACE) =====
+
+/** คำนวณ Gross CBM = กว้าง × ยาว × สูง (หน่วย ลบ.ม.) */
+export function getTruckGrossCBM(truck: TruckType): number {
+  return truck.dimensions.width * truck.dimensions.length * truck.dimensions.height;
+}
+
+/** คำนวณ Obstacle CBM = ผลรวมปริมาตรของสิ่งกีดขวางทั้งหมด (ซุ้มล้อ ฯลฯ) หน่วย ลบ.ม. */
+export function getTruckObstacleCBM(truck: TruckType): number {
+  return (truck.obstacles || []).reduce((sum, obstacle) => {
+    return sum + (obstacle.width * obstacle.length * obstacle.height) / 1000000;
+  }, 0);
+}
+
+/** คำนวณ Net CBM = Gross CBM - Obstacle CBM */
+export function getTruckNetCBM(truck: TruckType): number {
+  return Math.max(getTruckGrossCBM(truck) - getTruckObstacleCBM(truck), 0);
+}
