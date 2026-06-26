@@ -1714,23 +1714,20 @@ export default function Home() {
         <p>© 2026 หจก.เผ่าปัญญา ทรานสปอร์ต — เครื่องมือช่วยคำนวณการขนส่ง</p>
       </footer>
 
-      {/* Image Popup — backdrop is a non-interactive overlay; explicit ✕ button provides accessibility (S6848/S1082) */}
+      {/* Image Popup — backdrop is a native <button> (S6848) so it can be clicked to close
+          and supports Escape via onKeyDown. Inner div is a non-interactive container with
+          no event listeners (S1082). */}
       {showPopup && popupImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => setShowPopup(false)}
-          role="presentation"
-        >
-          {/* Stop propagation so clicks on the image container don't close the popup */}
-          <div
-            className="relative max-w-4xl max-h-[90vh]"
-            onClick={(e) => e.stopPropagation()}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            onClick={() => setShowPopup(false)}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setShowPopup(false); } }}
-            role="dialog"
-            aria-modal="true"
-            aria-label="ดูภาพรถยนต์"
+            className="absolute inset-0 w-full h-full bg-black/70 cursor-default"
+            aria-label="ปิดภาพขยาย"
             tabIndex={-1}
-          >
+          />
+          <div className="relative max-w-4xl max-h-[90vh] z-10">
             <Image src={popupImage} alt="Truck detail" width={1200} height={800} className="max-h-[90vh] w-auto object-contain rounded-lg" />
             <button type="button" onClick={() => setShowPopup(false)} className="absolute top-2 right-2 bg-white text-gray-800 w-8 h-8 rounded-full font-bold shadow hover:bg-gray-100" aria-label="ปิด">✕</button>
           </div>
