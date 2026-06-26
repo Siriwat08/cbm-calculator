@@ -98,8 +98,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const numericPrice = parseFloat(price);
-    if (isNaN(numericPrice) || numericPrice <= 0 || numericPrice > 200) {
+    const numericPrice = Number.parseFloat(price);
+    if (Number.isNaN(numericPrice) || numericPrice <= 0 || numericPrice > 200) {
       return NextResponse.json(
         { error: 'ราคาต้องเป็นตัวเลขระหว่าง 0.01 - 200 บาท' },
         { status: 400 }
@@ -111,11 +111,11 @@ export async function POST(request: NextRequest) {
 
     // Use provided date or today's date in ISO format
     let priceDate = date;
-    if (!priceDate) {
-      priceDate = getTodayISO();
-    } else {
+    if (priceDate) {
       // Convert if Thai date provided
       priceDate = convertThaiDateToISO(priceDate);
+    } else {
+      priceDate = getTodayISO();
     }
 
     // Validate date format (now must be ISO)
@@ -136,12 +136,12 @@ export async function POST(request: NextRequest) {
     // Check if same date exists, update it
     const existingIndex = history.findIndex(entry => entry.date === priceDate);
 
-    if (existingIndex !== -1) {
-      history[existingIndex] = newEntry;
-    } else {
+    if (existingIndex === -1) {
       // Add new entry at the beginning, sorted by date descending
       history.unshift(newEntry);
       history.sort((a, b) => b.date.localeCompare(a.date));
+    } else {
+      history[existingIndex] = newEntry;
     }
 
     // Keep only last N entries
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: newEntry,
-      message: existingIndex !== -1 ? 'อัปเดตราคาเรียบร้อย' : 'เพิ่มราคาใหม่เรียบร้อย',
+      message: existingIndex === -1 ? 'เพิ่มราคาใหม่เรียบร้อย' : 'อัปเดตราคาเรียบร้อย',
     });
 
   } catch (error) {

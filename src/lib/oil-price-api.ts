@@ -87,8 +87,8 @@ export function normalizeToHistoryArray(raw: unknown): OilPriceEntry[] {
 
   // 5. String that might be a number
   if (typeof raw === 'string') {
-    const num = parseFloat(raw);
-    if (!isNaN(num) && num > 0) {
+    const num = Number.parseFloat(raw);
+    if (!Number.isNaN(num) && num > 0) {
       return [{ date: getTodayISO(), price: num }];
     }
   }
@@ -226,7 +226,7 @@ export async function fetchFromBangchak(): Promise<{ date: string; price: number
           buddhistYear = '25' + buddhistYear.padStart(2, '0');
         }
         // Convert Buddhist year to Christian year for ISO format
-        const christianYear = parseInt(buddhistYear) - 543;
+        const christianYear = Number.parseInt(buddhistYear, 10) - 543;
         effectiveDate = `${christianYear}-${month}-${day}`;
       } else {
         // Fallback: use today's date in ISO format

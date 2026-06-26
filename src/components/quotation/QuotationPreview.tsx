@@ -4,7 +4,7 @@ import { formatThaiDate, formatThaiDateLong } from '@/lib/date-utils';
 import type { QuotationData } from './QuotationForm';
 
 interface QuotationPreviewProps {
-  quotation: QuotationData;
+  readonly quotation: QuotationData;
 }
 
 export default function QuotationPreview({ quotation }: QuotationPreviewProps) {
@@ -40,9 +40,6 @@ export default function QuotationPreview({ quotation }: QuotationPreviewProps) {
 
   const createdThaiDate = createdAt ? formatThaiDateLong(createdAt.split('T')[0] || createdAt) : formatThaiDateLong(new Date().toISOString().split('T')[0]);
   const createdShortDate = createdAt ? formatThaiDate(createdAt.split('T')[0] || createdAt) : formatThaiDate(new Date().toISOString().split('T')[0]);
-
-  // Calculate total trips count
-  const totalTrips = trips.reduce((sum, t) => sum + (t.numberOfTrips || 1), 0);
 
   return (
     <>
@@ -483,7 +480,7 @@ export default function QuotationPreview({ quotation }: QuotationPreviewProps) {
                     {trip.items && trip.items.length > 0 && (
                       <div className="qt-items-list">
                         {trip.items.map((item, itemIdx) => (
-                          <div key={itemIdx} className="qt-item-row">
+                          <div key={`${item.name || 'item'}-${item.width}x${item.length}x${item.height}-${item.quantity}`} className="qt-item-row">
                             {item.name ? `${item.name}: ` : ''}{item.width}×{item.length}×{item.height} ซม. × {item.quantity} ชิ้น ({item.weight} kg)
                           </div>
                         ))}

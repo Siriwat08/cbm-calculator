@@ -10,8 +10,12 @@ import {
   MAX_HISTORY_ENTRIES,
 } from '@/lib/oil-price-api';
 
-// ===== CRON HANDLER =====
-export async function GET(request: NextRequest) {
+// ===== AUTH HELPERS =====
+function resolveAuth(request: NextRequest): {
+  authorized: boolean;
+  authMethod: string;
+  vercelCronHeader: string | null;
+} {
   // Auth check — 3 ways to authenticate:
   // 1. Vercel Cron auto-sends "vercel-cron" header (value = schedule string like "30 22 * * *")
   // 2. CRON_SECRET env var — Vercel sends Authorization: Bearer <CRON_SECRET>
@@ -21,11 +25,26 @@ export async function GET(request: NextRequest) {
 
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get('authorization')?.replace('Bearer ', '');
-  const isCronSecretValid = cronSecret && authHeader === cronSecret;
+  const isCronSecretValid = Boolean(cronSecret && authHeader === cronSecret);
 
   const isApiKeyValid = validateApiKey(request);
 
-  if (!isVercelCron && !isCronSecretValid && !isApiKeyValid) {
+  let authMethod = 'API_KEY';
+  if (isVercelCron) authMethod = 'vercel-cron';
+  else if (isCronSecretValid) authMethod = 'CRON_SECRET';
+
+  return {
+    authorized: isVercelCron || isCronSecretValid || isApiKeyValid,
+    authMethod,
+    vercelCronHeader,
+  };
+}
+
+// ===== CRON HANDLER =====
+export async function GET(request: NextRequest) {
+  const { authorized, authMethod, vercelCronHeader } = resolveAuth(request);
+
+  if (!authorized) {
     console.warn('[Cron] ❌ Unauthorized request — missing vercel-cron header, CRON_SECRET, or API key');
     return NextResponse.json(
       { error: 'ไม่มีสิทธิ์เข้าถึง — กรุณาระบุ API Key หรือเรียกผ่าน Vercel Cron' },
@@ -33,8 +52,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const authMethod = isVercelCron ? 'vercel-cron' : isCronSecretValid ? 'CRON_SECRET' : 'API_KEY';
-  console.log(`[Cron] ✅ Authenticated via: ${authMethod}${vercelCronHeader ? ` (${vercelCronHeader})` : ''}`);
+  const cronSuffix = vercelCronHeader ? ` (${vercelCronHeader})` : '';
+  console.log(`[Cron] ✅ Authenticated via: ${authMethod}${cronSuffix}`);
 
   const bangkokToday = getTodayISO();
   const utcNow = new Date().toISOString();

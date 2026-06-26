@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import QuotationPreview from '@/components/quotation/QuotationPreview';
 import { decodeQuotationData, type QuotationData } from '@/components/quotation/QuotationForm';
 import { generatePdf } from '@/lib/quotation-pdf';
-import { useRef } from 'react';
 
 function QuotationShareContent() {
   const searchParams = useSearchParams();
@@ -88,7 +87,7 @@ function QuotationShareContent() {
               {isGeneratingPdf ? 'กำลังสร้าง PDF...' : '📄 ดาวน์โหลด PDF'}
             </button>
             <button
-              onClick={() => window.print()}
+              onClick={() => globalThis.print()}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition"
             >
               🖨️ พิมพ์

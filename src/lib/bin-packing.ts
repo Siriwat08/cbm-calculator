@@ -66,6 +66,75 @@ function isSpaceInside(inner: Space3D, outer: Space3D): boolean {
   );
 }
 
+interface SubSpaceCut {
+  width: number;
+  length: number;
+  height: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+function pushIfPositive(spaces: Space3D[], cut: SubSpaceCut): void {
+  if (cut.width > 0 && cut.length > 0 && cut.height > 0) {
+    spaces.push(cut);
+  }
+}
+
+/**
+ * แบ่ง space เดียวให้อยู่รอบ ๆ obstacle (Guillotine cut รอบด้าน)
+ */
+function splitSpaceByObstacle(space: Space3D, obs: PlacedBox): Space3D[] {
+  const out: Space3D[] = [];
+  // 1) พื้นที่ด้านขวาของ obstacle (แกน X)
+  pushIfPositive(out, {
+    x: obs.x + obs.width, y: space.y, z: space.z,
+    width: space.x + space.width - (obs.x + obs.width),
+    length: space.length, height: space.height,
+  });
+  // 2) พื้นที่ด้านซ้ายของ obstacle (แกน X)
+  pushIfPositive(out, {
+    x: space.x, y: space.y, z: space.z,
+    width: obs.x - space.x,
+    length: space.length, height: space.height,
+  });
+  // 3) พื้นที่ด้านหน้า obstacle (แกน Y — ฝั่งปลายรถ)
+  pushIfPositive(out, {
+    x: space.x, y: obs.y + obs.length, z: space.z,
+    width: space.width,
+    length: space.y + space.length - (obs.y + obs.length),
+    height: space.height,
+  });
+  // 4) พื้นที่ด้านหลัง obstacle (แกน Y — ฝั่งห้องโดยสาร)
+  pushIfPositive(out, {
+    x: space.x, y: space.y, z: space.z,
+    width: space.width,
+    length: obs.y - space.y,
+    height: space.height,
+  });
+  // 5) พื้นที่เหนือ obstacle (แกน Z — วางทับบนซุ้มล้อได้)
+  pushIfPositive(out, {
+    x: space.x, y: space.y, z: obs.z + obs.height,
+    width: space.width, length: space.length,
+    height: space.z + space.height - (obs.z + obs.height),
+  });
+  // 6) พื้นที่ใต้ obstacle (แกน Z — ไม่ควรเกิด)
+  pushIfPositive(out, {
+    x: space.x, y: space.y, z: space.z,
+    width: space.width, length: space.length,
+    height: obs.z - space.z,
+  });
+  return out;
+}
+
+function spacesOverlap(a: { x: number; y: number; z: number; width: number; length: number; height: number },
+                      b: { x: number; y: number; z: number; width: number; length: number; height: number }): boolean {
+  const oX = a.x < b.x + b.width && a.x + a.width > b.x;
+  const oY = a.y < b.y + b.length && a.y + a.length > b.y;
+  const oZ = a.z < b.z + b.height && a.z + a.height > b.z;
+  return oX && oY && oZ;
+}
+
 /**
  * ประมวลผล obstacles (ซุ้มล้อ) ล่วงหน้า — แปลงพื้นที่รถทั้งหมดให้เป็นช่องว่างที่ไม่ทับซุ้มล้อ
  * ทำงานโดย: สำหรับแต่ละ obstacle จะแบ่งแต่ละ available space ที่ทับซุ้มล้อออกเป็น sub-spaces
@@ -96,102 +165,18 @@ function processObstacles(
   // สำหรับแต่ละ obstacle จะแบ่ง spaces ที่ทับมันออก
   for (const obs of placedObstacles) {
     const newSpaces: Space3D[] = [];
-
     for (const space of spaces) {
-      // ตรวจสอบว่า space นี้ทับ obstacle หรือไม่
-      const overlapX = space.x < obs.x + obs.width && space.x + space.width > obs.x;
-      const overlapY = space.y < obs.y + obs.length && space.y + space.length > obs.y;
-      const overlapZ = space.z < obs.z + obs.height && space.z + space.height > obs.z;
-
-      if (!overlapX || !overlapY || !overlapZ) {
+      if (spacesOverlap(space, obs)) {
+        newSpaces.push(...splitSpaceByObstacle(space, obs));
+      } else {
         // ไม่ทับกัน → เก็บ space เดิมไว้
         newSpaces.push(space);
-        continue;
-      }
-
-      // ทับกัน → แบ่ง space ออกเป็น sub-spaces รอบ ๆ obstacle (Guillotine cut)
-      // 1) พื้นที่ด้านขวาของ obstacle (ในแกน X)
-      const rightW = space.x + space.width - (obs.x + obs.width);
-      if (rightW > 0) {
-        newSpaces.push({
-          x: obs.x + obs.width,
-          y: space.y,
-          z: space.z,
-          width: rightW,
-          length: space.length,
-          height: space.height,
-        });
-      }
-      // 2) พื้นที่ด้านซ้ายของ obstacle (ในแกน X) — สำคัญเพราะ obstacle อาจไม่ชิดผนังซ้าย
-      const leftW = obs.x - space.x;
-      if (leftW > 0) {
-        newSpaces.push({
-          x: space.x,
-          y: space.y,
-          z: space.z,
-          width: leftW,
-          length: space.length,
-          height: space.height,
-        });
-      }
-      // 3) พื้นที่ด้านหน้าของ obstacle (ในแกน Y — ฝั่งปลายรถ)
-      const frontL = space.y + space.length - (obs.y + obs.length);
-      if (frontL > 0) {
-        newSpaces.push({
-          x: space.x,
-          y: obs.y + obs.length,
-          z: space.z,
-          width: space.width,
-          length: frontL,
-          height: space.height,
-        });
-      }
-      // 4) พื้นที่ด้านหลังของ obstacle (ในแกน Y — ฝั่งห้องโดยสาร)
-      const backL = obs.y - space.y;
-      if (backL > 0) {
-        newSpaces.push({
-          x: space.x,
-          y: space.y,
-          z: space.z,
-          width: space.width,
-          length: backL,
-          height: space.height,
-        });
-      }
-      // 5) พื้นที่เหนือ obstacle (ในแกน Z — วางทับบนซุ้มล้อได้)
-      const topH = space.z + space.height - (obs.z + obs.height);
-      if (topH > 0) {
-        newSpaces.push({
-          x: space.x,
-          y: space.y,
-          z: obs.z + obs.height,
-          width: space.width,
-          length: space.length,
-          height: topH,
-        });
-      }
-      // 6) พื้นที่ใต้ obstacle (ในแกน Z — ไม่ควรเกิดเพราะ obstacle ปกติวางบนพื้น z=0)
-      const bottomH = obs.z - space.z;
-      if (bottomH > 0) {
-        newSpaces.push({
-          x: space.x,
-          y: space.y,
-          z: space.z,
-          width: space.width,
-          length: space.length,
-          height: bottomH,
-        });
       }
     }
 
     // deduplicate + ลบ spaces ที่ยังทับ obstacle ตัวเดิมหรือ obstacle ก่อนหน้า
     spaces = deduplicateSpaces(newSpaces).filter(s =>
-      placedObstacles.every(po => {
-        const oX = s.x < po.x + po.width && s.x + s.width > po.x;
-        const oY = s.y < po.y + po.length && s.y + s.length > po.y;
-        const oZ = s.z < po.z + po.height && s.z + s.height > po.z;
-        return !(oX && oY && oZ);
-      })
+      placedObstacles.every(po => !spacesOverlap(s, po))
     );
   }
 
@@ -241,11 +226,7 @@ function hasNoOverlap(
   placedBoxes: PlacedBox[]
 ): boolean {
   for (const placed of placedBoxes) {
-    const overlapX = space.x < placed.x + placed.width && space.x + space.width > placed.x;
-    const overlapY = space.y < placed.y + placed.length && space.y + space.length > placed.y;
-    const overlapZ = space.z < placed.z + placed.height && space.z + space.height > placed.z;
-
-    if (overlapX && overlapY && overlapZ) {
+    if (spacesOverlap(space, placed)) {
       return false;
     }
   }
@@ -301,6 +282,58 @@ function generateSubSpaces(
   return subSpaces;
 }
 
+function cleanupAvailableSpaces(availableSpaces: Space3D[], placedBoxes: PlacedBox[]): Space3D[] {
+  // Clean up: remove spaces that overlap with placed boxes
+  let cleaned = deduplicateSpaces(availableSpaces).filter(space => hasNoOverlap(space, placedBoxes));
+  // Remove redundant spaces (spaces completely inside other spaces)
+  cleaned = deduplicateSpaces(cleaned).filter((space, idx, arr) => {
+    return !arr.some((other, otherIdx) =>
+      otherIdx !== idx && isSpaceInside(space, other)
+    );
+  });
+  // Cap available spaces to prevent unbounded growth (O(n²) cleanup)
+  // Keep only the largest 50 spaces — sufficient for typical cargo scenarios
+  if (cleaned.length > 50) {
+    cleaned.sort((a, b) => (b.width * b.length * b.height) - (a.width * a.length * a.height));
+    cleaned = cleaned.slice(0, 50);
+  }
+  return cleaned;
+}
+
+/**
+ * Try to place a single item using any rotation in any available space.
+ * Returns the new state (placedBox, packedItemEntry) if placed, otherwise null.
+ * Mutates `availableSpacesRef` and `placedBoxes` on success.
+ */
+function tryPlaceItem(
+  item: { cargoIndex: number; itemIndex: number; dimensions: Box3D; volume: number },
+  availableSpacesRef: { spaces: Space3D[] },
+  placedBoxes: PlacedBox[]
+): { newBox: PlacedBox; packedItem: PackedItem; usedSpace: Space3D; subSpaces: Space3D[] } | null {
+  const rotations = getRotations(item.dimensions);
+  for (const rotation of rotations) {
+    for (const space of availableSpacesRef.spaces) {
+      if (!canFitInSpace(rotation, space)) continue;
+      const newBox: PlacedBox = {
+        x: space.x, y: space.y, z: space.z,
+        width: rotation.width, length: rotation.length, height: rotation.height,
+        cargoIndex: item.cargoIndex, itemIndex: item.itemIndex,
+      };
+      if (!hasNoOverlap(newBox, placedBoxes)) continue;
+      const subSpaces = generateSubSpaces(space, newBox);
+      const packedItem: PackedItem = {
+        itemIndex: item.itemIndex,
+        cargoIndex: item.cargoIndex,
+        position: { x: newBox.x, y: newBox.y, z: newBox.z },
+        rotatedDimensions: rotation,
+        fits: true,
+      };
+      return { newBox, packedItem, usedSpace: space, subSpaces };
+    }
+  }
+  return null;
+}
+
 // Main 3D Bin Packing function
 export function performBinPacking(
   cargoItems: CargoItem[],
@@ -351,7 +384,7 @@ export function performBinPacking(
   const { spaces: initialSpaces, placedObstacles } = processObstacles(initialSpace, truck.obstacles || []);
 
   // Initialize available spaces (หลังตัดซุ้มล้อแล้ว)
-  let availableSpaces: Space3D[] = initialSpaces;
+  const availableSpacesRef = { spaces: initialSpaces };
 
   // placedBoxes เริ่มจาก obstacles ที่วางอยู่ก่อนแล้ว (ซุ้มล้อ)
   const placedBoxes: PlacedBox[] = [...placedObstacles];
@@ -360,83 +393,23 @@ export function performBinPacking(
   let utilizedCBM = 0;
 
   for (const item of itemsToPack) {
-    const rotations = getRotations(item.dimensions);
-    let placed = false;
-
     // Sort available spaces by volume (smallest first to find tightest fit)
-    availableSpaces.sort((a, b) => {
+    availableSpacesRef.spaces.sort((a, b) => {
       const volA = a.width * a.length * a.height;
       const volB = b.width * b.length * b.height;
       return volA - volB;
     });
 
-    for (const rotation of rotations) {
-      if (placed) break;
-
-      for (const space of availableSpaces) {
-        if (placed) break;
-
-        if (!canFitInSpace(rotation, space)) continue;
-
-        // Place the item at the corner of this space
-        const newBox: PlacedBox = {
-          x: space.x,
-          y: space.y,
-          z: space.z,
-          width: rotation.width,
-          length: rotation.length,
-          height: rotation.height,
-          cargoIndex: item.cargoIndex,
-          itemIndex: item.itemIndex,
-        };
-
-        // Verify no overlap with existing boxes
-        if (!hasNoOverlap(newBox, placedBoxes)) continue;
-
-        // Place the box
-        placedBoxes.push(newBox);
-        utilizedCBM += item.volume;
-
-        packedItems.push({
-          itemIndex: item.itemIndex,
-          cargoIndex: item.cargoIndex,
-          position: { x: newBox.x, y: newBox.y, z: newBox.z },
-          rotatedDimensions: rotation,
-          fits: true,
-        });
-
-        // Generate new sub-spaces
-        const subSpaces = generateSubSpaces(space, newBox);
-
-        // Remove the used space and add sub-spaces
-        availableSpaces = availableSpaces.filter(s => s !== space);
-        availableSpaces.push(...subSpaces);
-
-        // Clean up: remove spaces that are inside other spaces or overlap with placed boxes
-        availableSpaces = deduplicateSpaces(availableSpaces).filter(space => {
-          // Must not overlap any placed box (รวม obstacles)
-          return hasNoOverlap(space, placedBoxes);
-        });
-
-        // Remove redundant spaces (spaces completely inside other spaces)
-        availableSpaces = deduplicateSpaces(availableSpaces).filter((space, idx, arr) => {
-          return !arr.some((other, otherIdx) =>
-            otherIdx !== idx && isSpaceInside(space, other)
-          );
-        });
-
-        // Cap available spaces to prevent unbounded growth (O(n²) cleanup)
-        // Keep only the largest 50 spaces — sufficient for typical cargo scenarios
-        if (availableSpaces.length > 50) {
-          availableSpaces.sort((a, b) => (b.width * b.length * b.height) - (a.width * a.length * a.height));
-          availableSpaces = availableSpaces.slice(0, 50);
-        }
-
-        placed = true;
-      }
-    }
-
-    if (!placed) {
+    const placement = tryPlaceItem(item, availableSpacesRef, placedBoxes);
+    if (placement) {
+      placedBoxes.push(placement.newBox);
+      utilizedCBM += item.volume;
+      packedItems.push(placement.packedItem);
+      // Remove the used space and add sub-spaces
+      availableSpacesRef.spaces = availableSpacesRef.spaces.filter(s => s !== placement.usedSpace);
+      availableSpacesRef.spaces.push(...placement.subSpaces);
+      availableSpacesRef.spaces = cleanupAvailableSpaces(availableSpacesRef.spaces, placedBoxes);
+    } else {
       unfittedItems.push({
         cargoIndex: item.cargoIndex,
         itemIndex: item.itemIndex,

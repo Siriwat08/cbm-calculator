@@ -4,9 +4,9 @@ import { useState, useMemo } from 'react';
 import type { BinPackingResult, TruckType, CargoItem } from '@/lib/types';
 
 interface BinPackingVisualizationProps {
-  result: BinPackingResult;
-  truck: TruckType;
-  cargoItems: CargoItem[];
+  readonly result: BinPackingResult;
+  readonly truck: TruckType;
+  readonly cargoItems: CargoItem[];
 }
 
 // Color palette for different cargo items
@@ -62,6 +62,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     x: number; y: number; z: number;          // visual position (y=0 is back/door)
     w: number; l: number; h: number;           // visual dimensions
     cargoIndex: number; colorIdx: number;
+    itemIndex: number;
     label: string;
     origW: number; origL: number; origH: number;
     depthFromDoor: number; // cm from rear door
@@ -108,6 +109,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
       l: item.rotatedDimensions.length * scale,
       h: item.rotatedDimensions.height * scale,
       cargoIndex: item.cargoIndex,
+      itemIndex: item.itemIndex,
       colorIdx: cIdx,
       label: cargoItem ? `รายการ ${item.cargoIndex + 1}` : `ชิ้น ${item.itemIndex + 1}`,
       origW: item.rotatedDimensions.width,
@@ -125,7 +127,6 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
 
   // Calculate the depth of the deepest item from the door (how far items go into the truck)
   const deepestItemEnd = placements.reduce((max, p) => Math.max(max, p.y + p.l), 0);
-  const remainingSpaceFromDoor = sL - deepestItemEnd; // This is now the space at the FRONT (cab side)
   const spaceNearDoor = placements.length === 0 ? sL : Math.min(...placements.map(p => p.y));
 
   // ============ SVG RENDERING ============
@@ -166,7 +167,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const x = pad + arch.x;
           const y = pad + (sH - arch.z - arch.h); // SVG y is top-down, z is bottom-up
           return (
-            <g key={`arch-${idx}`}>
+            <g key={`arch-rear-${arch.label}-${idx}`}>
               <rect x={x} y={y} width={arch.w} height={arch.h}
                 fill="#9CA3AF" fillOpacity={0.85}
                 stroke="#4B5563" strokeWidth="2" rx="2"
@@ -193,7 +194,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const x = pad + p.x;
           const y = pad + (sH - p.z - p.h); // SVG y is top-down, z is bottom-up
           return (
-            <g key={idx}>
+            <g key={`rear-${p.cargoIndex}-${p.itemIndex}`}>
               <rect x={x} y={y} width={p.w} height={p.h}
                 fill={color.fill} fillOpacity={opacity}
                 stroke={color.stroke} strokeWidth="1.5" rx="2" />
@@ -254,7 +255,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const x = pad + arch.x;
           const y = pad + arch.y;
           return (
-            <g key={`arch-top-${idx}`}>
+            <g key={`arch-top-${arch.label}-${idx}`}>
               <rect x={x} y={y} width={arch.w} height={arch.l}
                 fill="#9CA3AF" fillOpacity={0.85}
                 stroke="#4B5563" strokeWidth="2" rx="2"
@@ -277,7 +278,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const heightRatio = p.h / sH;
           const opacity = 0.5 + 0.5 * heightRatio;
           return (
-            <g key={idx}>
+            <g key={`top-${p.cargoIndex}-${p.itemIndex}`}>
               <rect x={pad + p.x} y={pad + p.y} width={p.w} height={p.l}
                 fill={color.fill} fillOpacity={opacity}
                 stroke={color.stroke} strokeWidth="1.5" rx="2" />
@@ -361,7 +362,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const x = pad + p.y; // y=0 is the door (left side)
           const y = pad + (sH - p.z - p.h);
           return (
-            <g key={idx}>
+            <g key={`side-${p.cargoIndex}-${p.itemIndex}`}>
               <rect x={x} y={y} width={p.l} height={p.h}
                 fill={color.fill} fillOpacity={0.75}
                 stroke={color.stroke} strokeWidth="1.5" rx="2" />
@@ -443,19 +444,11 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
     // Sort items by depth for proper occlusion
     const sorted = [...placements].sort((a, b) => (a.x + a.y) - (b.x + b.y));
 
-    // Door lines (rear face - y=0 plane)
-    const doorLines = [
-      [project(0, 0, 0), project(sW, 0, 0)],
-      [project(sW, 0, 0), project(sW, 0, sH)],
-      [project(sW, 0, sH), project(0, 0, sH)],
-      [project(0, 0, sH), project(0, 0, 0)],
-    ];
-
     return (
       <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
         {/* Truck wireframe */}
         {truckLines.map(([from, to], idx) => (
-          <line key={idx}
+          <line key={`truck-line-${idx}`}
             x1={from[0] + offsetX} y1={from[1] + offsetY}
             x2={to[0] + offsetX} y2={to[1] + offsetY}
             stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="6,3" />
@@ -508,7 +501,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           const labelPos = project(x + w / 2, y + l / 2, z + h);
 
           return (
-            <g key={idx}>
+            <g key={`3d-${p.cargoIndex}-${p.itemIndex}`}>
               {/* Left face */}
               <polygon points={leftFace}
                 fill={color.fill} fillOpacity={0.8}
@@ -555,7 +548,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
           ].map(p => `${p[0] + offsetX},${p[1] + offsetY}`).join(' ');
           const labelPos = project(x + w / 2, y + l / 2, z + h);
           return (
-            <g key={`arch-3d-${idx}`}>
+            <g key={`arch-3d-${arch.label}-${idx}`}>
               <polygon points={leftFace} fill="#9CA3AF" fillOpacity={0.9} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />
               <polygon points={rightFace} fill="#6B7280" fillOpacity={0.7} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />
               <polygon points={topFace} fill="#D1D5DB" fillOpacity={0.85} stroke="#374151" strokeWidth="1.5" strokeDasharray="2,1" />

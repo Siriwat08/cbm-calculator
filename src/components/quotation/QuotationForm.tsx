@@ -51,19 +51,19 @@ export interface QuotationData {
 
 interface QuotationFormProps {
   // Current app state to pre-fill
-  selectedJob: string;
-  distance: string;
-  currentOilPrice: number;
-  calculatedPrice: number | null;
-  rateData: Record<string, { oil_ranges: { min: number; max: number }[]; data: { dist_min: number; dist_max: number; prices: number[] }[] }> | null;
-  availableJobs: string[];
-  selectedTruck: TruckType;
-  cargoItems: CargoItem[];
-  includeLabor: boolean;
-  adminApiKey: string;
+  readonly selectedJob: string;
+  readonly distance: string;
+  readonly currentOilPrice: number;
+  readonly calculatedPrice: number | null;
+  readonly rateData: Record<string, { oil_ranges: { min: number; max: number }[]; data: { dist_min: number; dist_max: number; prices: number[] }[] }> | null;
+  readonly availableJobs: string[];
+  readonly selectedTruck: TruckType;
+  readonly cargoItems: CargoItem[];
+  readonly includeLabor: boolean;
+  readonly adminApiKey: string;
   // Route info from distance lookup
-  originName?: string;
-  destinationName?: string;
+  readonly originName?: string;
+  readonly destinationName?: string;
 }
 
 const EXPIRY_OPTIONS = [
@@ -73,21 +73,56 @@ const EXPIRY_OPTIONS = [
   { value: 30, label: '30 วัน' },
 ];
 
+/** Find oil range index that contains the given diesel price */
+function findOilRangeIndex(oilRanges: { min: number; max: number }[], dieselPrice: number): number {
+  for (let i = 0; i < oilRanges.length; i++) {
+    const range = oilRanges[i];
+    if (dieselPrice >= range.min && dieselPrice <= range.max) {
+      return i;
+    }
+  }
+  return oilRanges.length - 1;
+}
+
+/** Find distance range index that contains the given distance */
+function findDistanceRangeIndex(
+  data: { dist_min: number; dist_max: number }[] | undefined,
+  distance: number
+): number {
+  if (!data || data.length === 0) return -1;
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    if (distance >= row.dist_min && distance <= row.dist_max) {
+      return i;
+    }
+  }
+  // Out of range — clamp to nearest edge
+  if (distance < data[0].dist_min) return 0;
+  return data.length - 1;
+}
+
 /** สร้างเลขที่ใบเสนอราคา (ไม่ใช้ database) */
 function generateLocalQuotationNumber(): string {
   const now = new Date();
   const year = now.getFullYear();
   const month = (now.getMonth() + 1).toString().padStart(2, '0');
   const day = now.getDate().toString().padStart(2, '0');
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  // Use cryptographically secure random to avoid pseudorandom generator warning
+  const randomBytes = new Uint16Array(1);
+  crypto.getRandomValues(randomBytes);
+  const random = (randomBytes[0] % 10000).toString().padStart(4, '0');
   return `QT-${year}-${month}${day}-${random}`;
 }
 
 /** Encode QuotationData เป็น base64 URL-safe string */
 function encodeQuotationData(data: QuotationData): string {
   const json = JSON.stringify(data);
-  if (typeof window !== 'undefined') {
-    return btoa(unescape(encodeURIComponent(json)));
+  if (typeof globalThis !== 'undefined' && typeof globalThis.btoa === 'function') {
+    // Use TextEncoder + base64 conversion to avoid deprecated escape/unescape
+    const bytes = new TextEncoder().encode(json);
+    let binary = '';
+    bytes.forEach(b => { binary += String.fromCharCode(b); });
+    return globalThis.btoa(binary);
   }
   return Buffer.from(json).toString('base64');
 }
@@ -96,8 +131,11 @@ function encodeQuotationData(data: QuotationData): string {
 export function decodeQuotationData(encoded: string): QuotationData | null {
   try {
     let json: string;
-    if (typeof window !== 'undefined') {
-      json = decodeURIComponent(escape(atob(encoded)));
+    if (typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function') {
+      const binary = globalThis.atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      json = new TextDecoder().decode(bytes);
     } else {
       json = Buffer.from(encoded, 'base64').toString('utf-8');
     }
@@ -143,7 +181,7 @@ export default function QuotationForm({
         truckName: selectedTruck.name,
         truckCBM: selectedTruck.cbm,
         truckMaxWeight: selectedTruck.maxWeight,
-        distance: parseFloat(distance) || 0,
+        distance: Number.parseFloat(distance) || 0,
         dieselPrice: currentOilPrice,
         basePrice: price,
         laborCost: labor,
@@ -188,7 +226,7 @@ export default function QuotationForm({
       truckName: selectedTruck.name,
       truckCBM: selectedTruck.cbm,
       truckMaxWeight: selectedTruck.maxWeight,
-      distance: parseFloat(distance) || 0,
+      distance: Number.parseFloat(distance) || 0,
       dieselPrice: currentOilPrice,
       basePrice: price,
       laborCost: labor,
@@ -257,33 +295,8 @@ export default function QuotationForm({
     const jobData = rateData[jobKey];
     if (!jobData) return 0;
 
-    let oilIndex = -1;
-    for (let i = 0; i < jobData.oil_ranges.length; i++) {
-      const range = jobData.oil_ranges[i];
-      if (trip.dieselPrice >= range.min && trip.dieselPrice <= range.max) {
-        oilIndex = i;
-        break;
-      }
-    }
-    if (oilIndex === -1) oilIndex = jobData.oil_ranges.length - 1;
-
-    let distIndex = -1;
-    if (jobData.data && jobData.data.length > 0) {
-      for (let i = 0; i < jobData.data.length; i++) {
-        const row = jobData.data[i];
-        if (trip.distance >= row.dist_min && trip.distance <= row.dist_max) {
-          distIndex = i;
-          break;
-        }
-      }
-      if (distIndex === -1) {
-        if (trip.distance < jobData.data[0].dist_min) {
-          distIndex = 0;
-        } else {
-          distIndex = jobData.data.length - 1;
-        }
-      }
-    }
+    const oilIndex = findOilRangeIndex(jobData.oil_ranges, trip.dieselPrice);
+    const distIndex = findDistanceRangeIndex(jobData.data, trip.distance);
 
     if (distIndex >= 0 && jobData.data[distIndex]?.prices?.[oilIndex] !== undefined) {
       return jobData.data[distIndex].prices[oilIndex];
@@ -348,7 +361,7 @@ export default function QuotationForm({
   const handleGenerateShareLink = () => {
     const data = buildPreviewData();
     const encoded = encodeQuotationData(data);
-    const link = `${window.location.origin}/quotation?q=${encoded}`;
+    const link = `${globalThis.location?.origin || ''}/quotation?q=${encoded}`;
     setShareLink(link);
     navigator.clipboard.writeText(link).then(() => {
       toast({ title: 'คัดลอกลิงก์สำเร็จ', description: link });
@@ -397,7 +410,7 @@ export default function QuotationForm({
             {isGeneratingPdf ? (
               <span className="flex items-center gap-2">
                 <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
-                กำลังสร้าง PDF...
+                <span>กำลังสร้าง PDF...</span>
               </span>
             ) : (
               '📄 ดาวน์โหลด PDF'
@@ -410,7 +423,7 @@ export default function QuotationForm({
             🔗 แชร์ลิงก์ให้ลูกค้า
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={() => globalThis.print()}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition text-sm"
           >
             🖨️ พิมพ์
@@ -480,8 +493,9 @@ export default function QuotationForm({
             <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wide">👤 ข้อมูลลูกค้า</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-2">
-                <label className="text-xs text-gray-500 font-medium">ชื่อลูกค้า *</label>
+                <label htmlFor="qf-customer-name" className="text-xs text-gray-500 font-medium">ชื่อลูกค้า *</label>
                 <input
+                  id="qf-customer-name"
                   type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
@@ -490,8 +504,9 @@ export default function QuotationForm({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 font-medium">เบอร์โทร</label>
+                <label htmlFor="qf-customer-phone" className="text-xs text-gray-500 font-medium">เบอร์โทร</label>
                 <input
+                  id="qf-customer-phone"
                   type="tel"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
@@ -500,8 +515,9 @@ export default function QuotationForm({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 font-medium">อีเมล</label>
+                <label htmlFor="qf-customer-email" className="text-xs text-gray-500 font-medium">อีเมล</label>
                 <input
+                  id="qf-customer-email"
                   type="email"
                   value={customerEmail}
                   onChange={(e) => setCustomerEmail(e.target.value)}
@@ -510,8 +526,9 @@ export default function QuotationForm({
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="text-xs text-gray-500 font-medium">ที่อยู่</label>
+                <label htmlFor="qf-customer-address" className="text-xs text-gray-500 font-medium">ที่อยู่</label>
                 <textarea
+                  id="qf-customer-address"
                   value={customerAddress}
                   onChange={(e) => setCustomerAddress(e.target.value)}
                   className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none resize-none"
@@ -527,8 +544,9 @@ export default function QuotationForm({
             <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wide">🛣️ เส้นทาง</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-gray-500 font-medium">ต้นทาง *</label>
+                <label htmlFor="qf-origin" className="text-xs text-gray-500 font-medium">ต้นทาง *</label>
                 <input
+                  id="qf-origin"
                   type="text"
                   value={origin}
                   onChange={(e) => setOrigin(e.target.value)}
@@ -537,8 +555,9 @@ export default function QuotationForm({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500 font-medium">ปลายทาง *</label>
+                <label htmlFor="qf-destination" className="text-xs text-gray-500 font-medium">ปลายทาง *</label>
                 <input
+                  id="qf-destination"
                   type="text"
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
@@ -591,8 +610,9 @@ export default function QuotationForm({
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="text-xs text-gray-500 font-medium">ประเภทรถ</label>
+                    <label htmlFor={`qf-truck-${trip.id}`} className="text-xs text-gray-500 font-medium">ประเภทรถ</label>
                     <select
+                      id={`qf-truck-${trip.id}`}
                       value={trip.truckTypeId}
                       onChange={(e) => {
                         updateTrip(trip.id, 'truckTypeId', e.target.value);
@@ -606,12 +626,13 @@ export default function QuotationForm({
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 font-medium">ระยะทาง (กม.)</label>
+                    <label htmlFor={`qf-distance-${trip.id}`} className="text-xs text-gray-500 font-medium">ระยะทาง (กม.)</label>
                     <input
+                      id={`qf-distance-${trip.id}`}
                       type="number"
                       value={trip.distance || ''}
                       onChange={(e) => {
-                        updateTrip(trip.id, 'distance', parseFloat(e.target.value) || 0);
+                        updateTrip(trip.id, 'distance', Number.parseFloat(e.target.value) || 0);
                         setTimeout(() => recalculateTripPrice(trip.id), 50);
                       }}
                       className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none text-sm"
@@ -620,22 +641,24 @@ export default function QuotationForm({
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 font-medium">ราคา/เที่ยว (บาท)</label>
+                    <label htmlFor={`qf-base-price-${trip.id}`} className="text-xs text-gray-500 font-medium">ราคา/เที่ยว (บาท)</label>
                     <input
+                      id={`qf-base-price-${trip.id}`}
                       type="number"
                       value={trip.basePrice || ''}
-                      onChange={(e) => updateTrip(trip.id, 'basePrice', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => updateTrip(trip.id, 'basePrice', Number.parseFloat(e.target.value) || 0)}
                       className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none text-sm"
                       placeholder="0"
                       min="0"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 font-medium">จำนวนเที่ยว</label>
+                    <label htmlFor={`qf-num-trips-${trip.id}`} className="text-xs text-gray-500 font-medium">จำนวนเที่ยว</label>
                     <input
+                      id={`qf-num-trips-${trip.id}`}
                       type="number"
                       value={trip.numberOfTrips}
-                      onChange={(e) => updateTrip(trip.id, 'numberOfTrips', parseInt(e.target.value) || 1)}
+                      onChange={(e) => updateTrip(trip.id, 'numberOfTrips', Number.parseInt(e.target.value, 10) || 1)}
                       className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none text-sm"
                       min="1"
                     />
@@ -648,7 +671,7 @@ export default function QuotationForm({
                     <p className="text-xs text-gray-500 font-medium mb-1">📦 รายการสินค้า ({trip.items.length} รายการ)</p>
                     <div className="space-y-0.5 max-h-20 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
                       {trip.items.map((item, idx) => (
-                        <div key={idx} className="text-xs text-gray-600 flex gap-1">
+                        <div key={`${item.width}x${item.length}x${item.height}-${item.quantity}-${idx}`} className="text-xs text-gray-600 flex gap-1">
                           <span className="text-gray-400">{idx + 1}.</span>
                           <span>{item.width}×{item.length}×{item.height} ซม. × {item.quantity} ชิ้น ({item.weight} kg)</span>
                         </div>
@@ -685,10 +708,11 @@ export default function QuotationForm({
             <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wide">⚙️ ตั้งค่าอื่นๆ</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-gray-500 font-medium">วันหมดอายุ</label>
+                <label htmlFor="qf-expiry" className="text-xs text-gray-500 font-medium">วันหมดอายุ</label>
                 <select
+                  id="qf-expiry"
                   value={expiryDays}
-                  onChange={(e) => setExpiryDays(parseInt(e.target.value))}
+                  onChange={(e) => setExpiryDays(Number.parseInt(e.target.value, 10))}
                   className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none"
                 >
                   {EXPIRY_OPTIONS.map(opt => (
@@ -697,8 +721,9 @@ export default function QuotationForm({
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 font-medium">หมายเหตุ</label>
+                <label htmlFor="qf-notes" className="text-xs text-gray-500 font-medium">หมายเหตุ</label>
                 <textarea
+                  id="qf-notes"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 focus:border-purple-500 focus:outline-none resize-none"

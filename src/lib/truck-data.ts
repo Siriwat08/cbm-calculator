@@ -1,5 +1,10 @@
 import { TruckType } from './types';
-import { FALLBACK_DIESEL_PRICE, LABOR_COST } from './oil-price-api';
+
+/** @deprecated Use FALLBACK_DIESEL_PRICE from oil-price-api instead */
+export { FALLBACK_DIESEL_PRICE as FALLBACK_OIL_PRICE } from './oil-price-api';
+
+/** @deprecated Use LABOR_COST from oil-price-api instead */
+export { LABOR_COST } from './oil-price-api';
 
 export const truckTypes: TruckType[] = [
   {
@@ -12,7 +17,7 @@ export const truckTypes: TruckType[] = [
     //   ความกว้างในจุดกว้างสุด: 1,575 มม.
     //   ความยาวใน: 2,315 มม.
     //   ความสูงตู้ทึบจากพื้นกระบะ: 2,100 มม.
-    dimensions: { width: 1.575, length: 2.315, height: 2.100 },
+    dimensions: { width: 1.575, length: 2.315, height: 2.1 },
     usableSpace: 100, // ใช้พื้นที่เต็ม 100% เพราะมีการตัดซุ้มล้อแบบเจาะจงตำแหน่งแล้ว
     jobKey: '4ล้อ_PPY',
     // ซุ้มล้อ Revo ตอนเดียว — 2 ข้าง (ซ้าย+ขวา)
@@ -34,7 +39,7 @@ export const truckTypes: TruckType[] = [
     image: '/images/Screenshot_20260320_125652_OneDrive.jpg',
     cbm: 11,
     maxWeight: 3000,
-    dimensions: { width: 1.80, length: 3.20, height: 2.10 },
+    dimensions: { width: 1.8, length: 3.2, height: 2.1 },
     usableSpace: 100, // รถตู้พื้นเรียบ ไม่มีซุ้มล้อ
     jobKey: '4จัมโบ้_PPY',
     // ไม่มี obstacles — เป็นรถตู้พื้นเรียบ
@@ -45,18 +50,12 @@ export const truckTypes: TruckType[] = [
     image: '/images/Screenshot_20260320_125638_OneDrive.jpg',
     cbm: 32,
     maxWeight: 6000,
-    dimensions: { width: 2.40, length: 6.60, height: 2.35 },
+    dimensions: { width: 2.4, length: 6.6, height: 2.35 },
     usableSpace: 90,
     jobKey: '6ล้อ_PPY',
     // ไม่มี obstacles — เป็นรถตู้พื้นเรียบ
   },
 ];
-
-/** @deprecated Use FALLBACK_DIESEL_PRICE from oil-price-api instead */
-export const FALLBACK_OIL_PRICE = FALLBACK_DIESEL_PRICE;
-
-/** @deprecated Use LABOR_COST from oil-price-api instead */
-export { LABOR_COST };
 
 export function getTruckByJobKey(jobKey: string): TruckType | undefined {
   return truckTypes.find(t => t.jobKey === jobKey);
