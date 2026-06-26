@@ -307,6 +307,12 @@ function computeTruckPlans(
   return trucks.map(truck => buildTruckPlan(truck, cargoItems, rateData, currentOilPrice, dist, totalCBM, totalWeight));
 }
 
+// Returns true when all inputs needed to compute truck plans are valid.
+// Defined at module scope (S7721) so it isn't re-created on every render.
+function canComputeTruckPlans(allItemsValid: boolean, totalCBM: number, distance: string, dist: number): boolean {
+  return allItemsValid && totalCBM > 0 && Boolean(distance) && dist > 0;
+}
+
 export default function Home() {
   // ===== Tab State =====
   const [activeTab, setActiveTab] = useState<'cbm' | 'price' | 'compare' | 'quotation'>('cbm');
@@ -559,11 +565,6 @@ export default function Home() {
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
   // ===== Compare Tab: Truck Plans Comparison =====
-  // Helper: returns true when all inputs needed to compute truck plans are valid.
-  function canComputeTruckPlans(allItemsValid: boolean, totalCBM: number, distance: string, dist: number): boolean {
-    return allItemsValid && totalCBM > 0 && Boolean(distance) && dist > 0;
-  }
-
   const truckPlans = useMemo<TruckPlan[]>(() => {
     const dist = Number.parseFloat(distance);
     return canComputeTruckPlans(allItemsValid, totalCBM, distance, dist)
@@ -579,15 +580,11 @@ export default function Home() {
     if (Number.isNaN(dist) || dist <= 0) return [];
 
     const cheapestSingle = Math.min(...usablePlans.map(p => p.totalPrice!));
+    // Try all pairs of truck types (1-3 of each), keeping combinations cheaper than the single-truck cheapest.
     const results: MixedTruckPlan[] = [];
-
-    // Try all pairs of truck types
-    for (let i = 0; i < usablePlans.length; i++) {
+    usablePlans.forEach((planA, i) => {
       for (let j = i + 1; j < usablePlans.length; j++) {
-        const planA = usablePlans[i];
         const planB = usablePlans[j];
-
-        // Try combinations: 1-3 of each truck type
         for (let countA = 1; countA <= 3; countA++) {
           for (let countB = 1; countB <= 3; countB++) {
             const combination = tryMixedCombination(planA, planB, countA, countB, totalCBM, totalWeight, cheapestSingle);
@@ -597,7 +594,7 @@ export default function Home() {
           }
         }
       }
-    }
+    });
 
     // Sort by total price ascending and return unique best
     results.sort((a, b) => a.totalPrice! - b.totalPrice!);
@@ -1717,14 +1714,23 @@ export default function Home() {
         <p>© 2026 หจก.เผ่าปัญญา ทรานสปอร์ต — เครื่องมือช่วยคำนวณการขนส่ง</p>
       </footer>
 
-      {/* Image Popup — backdrop closes on click/Escape; explicit ✕ button also provides keyboard accessibility */}
+      {/* Image Popup — backdrop is a non-interactive overlay; explicit ✕ button provides accessibility (S6848/S1082) */}
       {showPopup && popupImage && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
           onClick={() => setShowPopup(false)}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setShowPopup(false); } }}
+          role="presentation"
         >
-          <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+          {/* Stop propagation so clicks on the image container don't close the popup */}
+          <div
+            className="relative max-w-4xl max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setShowPopup(false); } }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="ดูภาพรถยนต์"
+            tabIndex={-1}
+          >
             <Image src={popupImage} alt="Truck detail" width={1200} height={800} className="max-h-[90vh] w-auto object-contain rounded-lg" />
             <button type="button" onClick={() => setShowPopup(false)} className="absolute top-2 right-2 bg-white text-gray-800 w-8 h-8 rounded-full font-bold shadow hover:bg-gray-100" aria-label="ปิด">✕</button>
           </div>
