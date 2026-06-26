@@ -125,8 +125,7 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
   const usedPercent = truckVolume > 0 ? (totalItemsVolume / truckVolume * 100) : 0;
   const freePercent = 100 - usedPercent;
 
-  // Calculate the depth of the deepest item from the door (how far items go into the truck)
-  const deepestItemEnd = placements.reduce((max, p) => Math.max(max, p.y + p.l), 0);
+  // Space near the door (top of SVG) — used to highlight free area at the rear of the truck.
   const spaceNearDoor = placements.length === 0 ? sL : Math.min(...placements.map(p => p.y));
 
   // ============ SVG RENDERING ============
@@ -446,9 +445,9 @@ export default function BinPackingVisualization({ result, truck, cargoItems }: B
 
     return (
       <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="mx-auto">
-        {/* Truck wireframe */}
-        {truckLines.map(([from, to], idx) => (
-          <line key={`truck-line-${idx}`}
+        {/* Truck wireframe — keys are derived from line coordinates (S6479: avoid array index in keys) */}
+        {truckLines.map(([from, to]) => (
+          <line key={`line-${from[0]}x${from[1]}-${to[0]}x${to[1]}`}
             x1={from[0] + offsetX} y1={from[1] + offsetY}
             x2={to[0] + offsetX} y2={to[1] + offsetY}
             stroke="#94A3B8" strokeWidth="1.5" strokeDasharray="6,3" />

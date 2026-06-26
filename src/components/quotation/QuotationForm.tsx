@@ -121,7 +121,7 @@ function encodeQuotationData(data: QuotationData): string {
     // Use TextEncoder + base64 conversion to avoid deprecated escape/unescape
     const bytes = new TextEncoder().encode(json);
     let binary = '';
-    bytes.forEach(b => { binary += String.fromCharCode(b); });
+    bytes.forEach(b => { binary += String.fromCodePoint(b); });
     return globalThis.btoa(binary);
   }
   return Buffer.from(json).toString('base64');
@@ -134,7 +134,7 @@ export function decodeQuotationData(encoded: string): QuotationData | null {
     if (typeof globalThis !== 'undefined' && typeof globalThis.atob === 'function') {
       const binary = globalThis.atob(encoded);
       const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.codePointAt(i) ?? 0;
       json = new TextDecoder().decode(bytes);
     } else {
       json = Buffer.from(encoded, 'base64').toString('utf-8');

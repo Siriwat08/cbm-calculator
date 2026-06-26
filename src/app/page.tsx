@@ -87,26 +87,31 @@ function tripWeightColor(percent: number): string {
 // Returns the cheapest plan from a list of usable plans
 function findCheapestPlan(plans: TruckPlan[]): TruckPlan | null {
   if (plans.length === 0) return null;
-  return plans.reduce((a, b) => ((a.totalPrice ?? Infinity) < (b.totalPrice ?? Infinity) ? a : b));
+  return plans.reduce(
+    (a, b) => ((a.totalPrice ?? Infinity) < (b.totalPrice ?? Infinity) ? a : b),
+    plans[0]
+  );
 }
 
 // Returns the plan with the fewest trucks
 function findFewestTrucksPlan(plans: TruckPlan[]): TruckPlan | null {
   if (plans.length === 0) return null;
-  return plans.reduce((a, b) => (a.truckCount < b.truckCount ? a : b));
+  return plans.reduce((a, b) => (a.truckCount < b.truckCount ? a : b), plans[0]);
 }
 
 // Returns the plan that uses the most space (least waste)
 function findLeastWastePlan(plans: TruckPlan[]): TruckPlan | null {
   if (plans.length === 0) return null;
-  return plans.reduce((a, b) => (a.volumeUsage > b.volumeUsage ? a : b));
+  return plans.reduce((a, b) => (a.volumeUsage > b.volumeUsage ? a : b), plans[0]);
 }
 
 // Returns the plan with the cheapest price per CBM
 function findBestValuePlan(plans: TruckPlan[]): TruckPlan | null {
   if (plans.length === 0) return null;
-  return plans.reduce((a, b) =>
-    ((a.totalPrice ?? Infinity) / Math.max(a.volumeUsage, 0.01)) < ((b.totalPrice ?? Infinity) / Math.max(b.volumeUsage, 0.01)) ? a : b
+  return plans.reduce(
+    (a, b) =>
+      ((a.totalPrice ?? Infinity) / Math.max(a.volumeUsage, 0.01)) < ((b.totalPrice ?? Infinity) / Math.max(b.volumeUsage, 0.01)) ? a : b,
+    plans[0]
   );
 }
 
@@ -272,7 +277,7 @@ function buildTruckPlan(
 
   const trips = computeTruckTrips(cargoItems, truck);
   const truckCount = trips.length;
-  const totalPrice = pricePerTruck !== null ? pricePerTruck * truckCount : null;
+  const totalPrice = pricePerTruck === null ? null : pricePerTruck * truckCount;
   const weightUsage = (totalWeight / (truck.maxWeight * truckCount)) * 100;
   const volumeUsage = truckCount === 1 ? bpResult.utilizationPercent : (totalCBM / (truck.cbm * truckCount)) * 100;
 
@@ -554,16 +559,16 @@ export default function Home() {
   const hasValidationErrors = Object.keys(validationErrors).length > 0;
 
   // ===== Compare Tab: Truck Plans Comparison =====
+  // Helper: returns true when all inputs needed to compute truck plans are valid.
+  function canComputeTruckPlans(allItemsValid: boolean, totalCBM: number, distance: string, dist: number): boolean {
+    return allItemsValid && totalCBM > 0 && Boolean(distance) && dist > 0;
+  }
+
   const truckPlans = useMemo<TruckPlan[]>(() => {
-    // Guard clause using positive condition (S7735): only compute when all inputs are valid.
-    // Note: `dist > 0` is false for NaN, so it implicitly excludes NaN without an explicit isNaN check.
-    if (allItemsValid && totalCBM > 0 && distance) {
-      const dist = Number.parseFloat(distance);
-      if (dist > 0) {
-        return computeTruckPlans(cargoItems, truckTypes, rateData, currentOilPrice, dist, totalCBM, totalWeight);
-      }
-    }
-    return [];
+    const dist = Number.parseFloat(distance);
+    return canComputeTruckPlans(allItemsValid, totalCBM, distance, dist)
+      ? computeTruckPlans(cargoItems, truckTypes, rateData, currentOilPrice, dist, totalCBM, totalWeight)
+      : [];
   }, [cargoItems, allItemsValid, totalCBM, totalWeight, distance, rateData, currentOilPrice]);
 
   const mixedTruckPlans = useMemo<MixedTruckPlan[]>(() => {
@@ -838,15 +843,12 @@ export default function Home() {
     const isExpanded = expandedTruck === plan.truck.id;
 
     // Compute class strings with positive condition first (S7735/S3358)
-    const borderColorClass = plan.canUse
-      ? (isCheapest ? 'border-emerald-400 bg-emerald-50/30 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300')
-      : 'border-red-200 bg-red-50/50';
-    const iconBgClass = plan.canUse
-      ? (isCheapest ? 'bg-emerald-100' : 'bg-slate-100')
-      : 'bg-red-100';
-    const iconEmoji = plan.canUse
-      ? (isCheapest ? '🏆' : '🚛')
-      : '❌';
+    const expandedBorderClass = isCheapest ? 'border-emerald-400 bg-emerald-50/30 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300';
+    const borderColorClass = plan.canUse ? expandedBorderClass : 'border-red-200 bg-red-50/50';
+    const expandedIconBg = isCheapest ? 'bg-emerald-100' : 'bg-slate-100';
+    const iconBgClass = plan.canUse ? expandedIconBg : 'bg-red-100';
+    const expandedIcon = isCheapest ? '🏆' : '🚛';
+    const iconEmoji = plan.canUse ? expandedIcon : '❌';
     const subtitle = plan.canUse
       ? `${plan.truckCount} คัน · ฿${plan.pricePerTruck?.toLocaleString()}/คัน`
       : plan.reason;
@@ -857,7 +859,7 @@ export default function Home() {
       }
     };
 
-    const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const handleCardKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
       if (plan.canUse && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
         setExpandedTruck(isExpanded ? null : plan.truck.id);
@@ -867,11 +869,11 @@ export default function Home() {
     return (
       <div key={plan.truck.id} className={`rounded-xl border-2 overflow-hidden transition-all ${borderColorClass}`}>
         {/* Card Header */}
-        <div
-          role="button"
-          tabIndex={plan.canUse ? 0 : -1}
+        <button
+          type="button"
+          disabled={!plan.canUse}
           onKeyDown={handleCardKeyDown}
-          className={`flex items-center justify-between p-4 cursor-pointer ${plan.canUse ? 'hover:bg-gray-50' : 'opacity-60'}`}
+          className={`flex items-center justify-between p-4 cursor-pointer w-full text-left bg-transparent border-0 ${plan.canUse ? 'hover:bg-gray-50' : 'opacity-60 cursor-default'}`}
           onClick={toggleExpanded}
         >
           <div className="flex items-center gap-3">
@@ -903,7 +905,7 @@ export default function Home() {
               <span className={`text-xs text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
             )}
           </div>
-        </div>
+        </button>
 
         {/* Expanded Details */}
         {plan.canUse && isExpanded && (
@@ -1124,19 +1126,27 @@ export default function Home() {
               <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {truckTypes.map((truck) => (
                   <div key={truck.id} className={`rounded-xl border-2 transition-all ${selectedTruck.id === truck.id ? 'border-emerald-500 bg-emerald-50 shadow-lg' : 'border-gray-200 hover:border-emerald-300'}`}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTruck(truck); } }}
-                      className="relative h-48 overflow-hidden rounded-t-xl cursor-pointer"
-                      onClick={() => setSelectedTruck(truck)}
-                    >
+                    <div className="relative h-48 overflow-hidden rounded-t-xl">
                       <Image src={truck.image} alt={truck.name} fill className="object-cover object-top" style={{ objectPosition: 'top' }} />
-                      <button onClick={(e) => { e.stopPropagation(); openPopup(truck.image); }} className="absolute bottom-2 left-2 bg-white text-emerald-600 text-xs px-2 py-1 rounded shadow hover:bg-emerald-50">
+                      {/* Stretched button covers entire image area for selecting this truck (S6819: use button instead of role="button") */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTruck(truck)}
+                        className="absolute inset-0 w-full h-full cursor-pointer bg-transparent border-0 p-0"
+                        aria-label={`เลือกรถ ${truck.name}`}
+                      >
+                        <span className="sr-only">เลือกรถ {truck.name}</span>
+                      </button>
+                      {/* Popup button rendered on top via z-10 (sibling, not nested — avoids invalid nested button HTML) */}
+                      <button
+                        type="button"
+                        onClick={() => openPopup(truck.image)}
+                        className="absolute bottom-2 left-2 z-10 bg-white text-emerald-600 text-xs px-2 py-1 rounded shadow hover:bg-emerald-50"
+                      >
                         ดูข้อมูลเพิ่มเติม
                       </button>
                       {selectedTruck.id === truck.id && (
-                        <div className="absolute top-2 right-2 bg-emerald-600 text-white rounded-full p-1">✓</div>
+                        <div className="absolute top-2 right-2 bg-emerald-600 text-white rounded-full p-1 pointer-events-none">✓</div>
                       )}
                     </div>
                     <div className="p-3">
@@ -1590,7 +1600,7 @@ export default function Home() {
                         const isExpandedMixed = expandedTruck === `mixed-${idx}`;
                         const rotateClass = isExpandedMixed ? 'rotate-180' : '';
                         const toggleMixedExpanded = () => setExpandedTruck(isExpandedMixed ? null : `mixed-${idx}`);
-                        const handleMixedKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+                        const handleMixedKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             setExpandedTruck(isExpandedMixed ? null : `mixed-${idx}`);
@@ -1603,12 +1613,11 @@ export default function Home() {
                             idx === 0 ? 'border-teal-400 bg-teal-50/30 shadow-md' : 'border-gray-200'
                           }`}
                         >
-                          {/* Header - clickable to expand */}
-                          <div
-                            role="button"
-                            tabIndex={0}
+                          {/* Header - clickable to expand (S6819: use button instead of role="button") */}
+                          <button
+                            type="button"
                             onKeyDown={handleMixedKeyDown}
-                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50/50"
+                            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50/50 w-full text-left bg-transparent border-0"
                             onClick={toggleMixedExpanded}
                           >
                             <div className="flex items-center gap-2">
@@ -1619,7 +1628,7 @@ export default function Home() {
                               <p className="text-xl font-bold text-teal-600">฿{mixedPlan.totalPrice?.toLocaleString()}</p>
                               <span className={`text-xs text-gray-400 transition-transform ${rotateClass}`}>▼</span>
                             </div>
-                          </div>
+                          </button>
 
                           {/* Summary cards (always visible) */}
                           <div className="px-4 pb-2 space-y-2">
@@ -1708,18 +1717,16 @@ export default function Home() {
         <p>© 2026 หจก.เผ่าปัญญา ทรานสปอร์ต — เครื่องมือช่วยคำนวณการขนส่ง</p>
       </footer>
 
-      {/* Image Popup */}
+      {/* Image Popup — backdrop closes on click/Escape; explicit ✕ button also provides keyboard accessibility */}
       {showPopup && popupImage && (
         <div
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowPopup(false); } }}
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
           onClick={() => setShowPopup(false)}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setShowPopup(false); } }}
         >
-          <div className="relative max-w-4xl max-h-[90vh]">
+          <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <Image src={popupImage} alt="Truck detail" width={1200} height={800} className="max-h-[90vh] w-auto object-contain rounded-lg" />
-            <button onClick={() => setShowPopup(false)} className="absolute top-2 right-2 bg-white text-gray-800 w-8 h-8 rounded-full font-bold shadow hover:bg-gray-100">✕</button>
+            <button type="button" onClick={() => setShowPopup(false)} className="absolute top-2 right-2 bg-white text-gray-800 w-8 h-8 rounded-full font-bold shadow hover:bg-gray-100" aria-label="ปิด">✕</button>
           </div>
         </div>
       )}

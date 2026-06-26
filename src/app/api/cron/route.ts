@@ -9,6 +9,7 @@ import {
   HISTORY_KEY,
   MAX_HISTORY_ENTRIES,
 } from '@/lib/oil-price-api';
+import type { OilPriceEntry } from '@/lib/oil-price-api';
 
 // ===== AUTH HELPERS =====
 function resolveAuth(request: NextRequest): {
@@ -40,6 +41,60 @@ function resolveAuth(request: NextRequest): {
   };
 }
 
+/**
+ * Ensure history has an entry for the given date with the given price.
+ * - If the date already exists, the entry is updated in place.
+ * - If not, a new entry is inserted at the top.
+ * Returns the updated history (already trimmed to MAX_HISTORY_ENTRIES).
+ */
+function upsertEntryForDate(history: OilPriceEntry[], date: string, price: number): OilPriceEntry[] {
+  const entry: OilPriceEntry = { date, price };
+  const idx = history.findIndex(h => h.date === date);
+  if (idx === -1) {
+    return [entry, ...history].slice(0, MAX_HISTORY_ENTRIES);
+  }
+  const updated = [...history];
+  updated[idx] = entry;
+  return updated;
+}
+
+/**
+ * Handle the case where Bangchak API is unavailable.
+ * Falls back to the latest stored price for today's entry.
+ * Returns a NextResponse (success or 500), or null if no fallback is possible.
+ */
+async function handleBangchakUnavailable(
+  history: OilPriceEntry[],
+  bangkokToday: string
+): Promise<NextResponse | null> {
+  if (history.length === 0) {
+    return NextResponse.json(
+      { success: false, error: 'Failed to fetch oil price and no history available' },
+      { status: 500 }
+    );
+  }
+
+  const latestPrice = history[0].price;
+  console.log(`[Cron] Bangchak API failed, using latest stored price: ${latestPrice}`);
+
+  const updatedHistory = upsertEntryForDate(history, bangkokToday, latestPrice);
+  console.log(`[Cron] Upserted today's entry for ${bangkokToday} with fallback price ${latestPrice}`);
+
+  const saved = await setToEdgeConfig(HISTORY_KEY, updatedHistory);
+  if (saved) {
+    console.log(`[Cron] ✅ Saved ${updatedHistory.length} history entries (Bangchak fallback)`);
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: 'Bangchak API unavailable, used latest stored price for today',
+    date: bangkokToday,
+    price: latestPrice,
+    history: updatedHistory,
+    bangkokToday,
+  });
+}
+
 // ===== CRON HANDLER =====
 export async function GET(request: NextRequest) {
   const { authorized, authMethod, vercelCronHeader } = resolveAuth(request);
@@ -64,48 +119,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const currentPrice = await fetchFromBangchak();
-
-    // Get existing history (with defensive handling)
-    let history = await getOilPriceHistory();
+    const history = await getOilPriceHistory();
     console.log(`[Cron] Existing history: ${history.length} entries`);
 
+    // If Bangchak API fails, fall back to the latest stored price for today.
     if (!currentPrice) {
-      // If Bangchak API fails, use latest history price for today's entry
-      if (history.length > 0) {
-        const latestPrice = history[0].price;
-        console.log(`[Cron] Bangchak API failed, using latest stored price: ${latestPrice}`);
-
-        // IMPORTANT: Still create/update today's entry even when Bangchak is down
-        // This ensures the UI always shows today's date with the correct price
-        const todayEntry = { date: bangkokToday, price: latestPrice };
-        const todayIndex = history.findIndex(h => h.date === bangkokToday);
-        if (todayIndex === -1) {
-          history = [todayEntry, ...history].slice(0, MAX_HISTORY_ENTRIES);
-          console.log(`[Cron] Added today's entry for ${bangkokToday} with fallback price ${latestPrice}`);
-        } else {
-          history[todayIndex] = todayEntry;
-          console.log(`[Cron] Updated today's entry for ${bangkokToday} with fallback price ${latestPrice}`);
-        }
-
-        const saved = await setToEdgeConfig(HISTORY_KEY, history);
-        if (saved) {
-          console.log(`[Cron] ✅ Saved ${history.length} history entries (Bangchak fallback)`);
-        }
-
-        return NextResponse.json({
-          success: true,
-          message: 'Bangchak API unavailable, used latest stored price for today',
-          date: bangkokToday,
-          price: latestPrice,
-          history: history,
-          bangkokToday,
-        });
-      }
-
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to fetch oil price and no history available'
-      }, { status: 500 });
+      return (await handleBangchakUnavailable(history, bangkokToday)) as NextResponse;
     }
 
     console.log(`[Cron] Bangchak price: ${currentPrice.price} บาท — effective date: ${currentPrice.date} (Bangkok today: ${bangkokToday})`);
@@ -114,50 +133,40 @@ export async function GET(request: NextRequest) {
     // Bangchak reports the date when price was last CHANGED,
     // but if price hasn't changed today, that date stays stale (e.g. 30/05).
     // We create/update an entry for today so the UI always shows the current date.
-    const todayEntry = { date: bangkokToday, price: currentPrice.price };
-    const todayIndex = history.findIndex(h => h.date === bangkokToday);
-    if (todayIndex === -1) {
-      // No entry for today yet → add it at the top
-      history = [todayEntry, ...history].slice(0, MAX_HISTORY_ENTRIES);
-      console.log(`[Cron] Adding today's entry for ${bangkokToday} — total: ${history.length}`);
-    } else {
-      // Update existing today entry with latest price
-      history[todayIndex] = todayEntry;
-      console.log(`[Cron] Updated existing today entry for ${bangkokToday}`);
-    }
+    let updatedHistory = upsertEntryForDate(history, bangkokToday, currentPrice.price);
+    console.log(`[Cron] Upserted today's entry for ${bangkokToday}`);
 
     // Also preserve the Bangchak effective date entry if it's different from today
     // (This keeps the historical record of when the price actually changed)
     if (currentPrice.date !== bangkokToday) {
-      const effectiveIndex = history.findIndex(h => h.date === currentPrice.date);
+      const effectiveIndex = updatedHistory.findIndex(h => h.date === currentPrice.date);
       if (effectiveIndex === -1) {
-        history.push(currentPrice);
-        history.sort((a, b) => b.date.localeCompare(a.date));
-        history = history.slice(0, MAX_HISTORY_ENTRIES);
+        updatedHistory.push(currentPrice);
+        updatedHistory.sort((a, b) => b.date.localeCompare(a.date));
+        updatedHistory = updatedHistory.slice(0, MAX_HISTORY_ENTRIES);
         console.log(`[Cron] Also preserved Bangchak effective date entry for ${currentPrice.date}`);
       }
     }
 
-    const saved = await setToEdgeConfig(HISTORY_KEY, history);
+    const saved = await setToEdgeConfig(HISTORY_KEY, updatedHistory);
 
-    if (saved) {
-      console.log(`[Cron] ✅ Saved ${history.length} history entries to Edge Config`);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Oil price saved successfully',
-        date: bangkokToday,
-        price: currentPrice.price,
-        history: history,
-        bangkokToday,
-      });
-    } else {
+    if (!saved) {
       console.error('[Cron] ❌ Failed to save to Edge Config');
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to save to Edge Config',
-      }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: 'Failed to save to Edge Config' },
+        { status: 500 }
+      );
     }
+
+    console.log(`[Cron] ✅ Saved ${updatedHistory.length} history entries to Edge Config`);
+    return NextResponse.json({
+      success: true,
+      message: 'Oil price saved successfully',
+      date: bangkokToday,
+      price: currentPrice.price,
+      history: updatedHistory,
+      bangkokToday,
+    });
 
   } catch (error) {
     console.error('[Cron] Error:', error);
