@@ -82,46 +82,57 @@ function pushIfPositive(spaces: Space3D[], cut: SubSpaceCut): void {
 }
 
 /**
- * แบ่ง space เดียวให้อยู่รอบ ๆ obstacle (Guillotine cut รอบด้าน)
+ * แบ่ง space เดียวให้อยู่รอบ ๆ obstacle (Guillotine cut)
+ *
+ * กลยุทธ์ (แบบใหม่):
+ *   - พื้นที่ด้านข้าง/หน้า/หลัง (left/right/front/back) ขยายเต็มความสูงของ space
+ *     (z ตั้งแต่พื้นจนถึงเพดาน) → algorithm จะได้วางของบนพื้นได้เต็มที่
+ *   - พื้นที่ "Top" (เหนือ obstacle) จะจำกัดเฉพาะ footprint ของ obstacle เท่านั้น
+ *     (ไม่ครอบคลุมทั้งคันรถ) → กล่องจะไม่ "ลอย" ในตำแหน่งที่พื้นด้านล่างว่างเปล่า
+ *   - พื้นที่ "Bottom" ปกติไม่เกิด (obstacle ส่วนใหญ่วางบนพื้น z=0) แต่เก็บไว้เผื่อ
  */
 function splitSpaceByObstacle(space: Space3D, obs: PlacedBox): Space3D[] {
   const out: Space3D[] = [];
-  // 1) พื้นที่ด้านขวาของ obstacle (แกน X)
+  const fullHeightBottom = space.z;
+  const fullHeightTop = space.z + space.height;
+
+  // 1) พื้นที่ด้านขวาของ obstacle (แกน X) — เต็มความสูง
   pushIfPositive(out, {
-    x: obs.x + obs.width, y: space.y, z: space.z,
+    x: obs.x + obs.width, y: space.y, z: fullHeightBottom,
     width: space.x + space.width - (obs.x + obs.width),
-    length: space.length, height: space.height,
+    length: space.length, height: fullHeightTop - fullHeightBottom,
   });
-  // 2) พื้นที่ด้านซ้ายของ obstacle (แกน X)
+  // 2) พื้นที่ด้านซ้ายของ obstacle (แกน X) — เต็มความสูง
   pushIfPositive(out, {
-    x: space.x, y: space.y, z: space.z,
+    x: space.x, y: space.y, z: fullHeightBottom,
     width: obs.x - space.x,
-    length: space.length, height: space.height,
+    length: space.length, height: fullHeightTop - fullHeightBottom,
   });
-  // 3) พื้นที่ด้านหน้า obstacle (แกน Y — ฝั่งปลายรถ)
+  // 3) พื้นที่ด้านหน้า obstacle (แกน Y — ฝั่งปลายรถ) — เต็มความสูง, เฉพาะแกน X ที่ทับ obstacle
   pushIfPositive(out, {
-    x: space.x, y: obs.y + obs.length, z: space.z,
-    width: space.width,
+    x: obs.x, y: obs.y + obs.length, z: fullHeightBottom,
+    width: obs.width,
     length: space.y + space.length - (obs.y + obs.length),
-    height: space.height,
+    height: fullHeightTop - fullHeightBottom,
   });
-  // 4) พื้นที่ด้านหลัง obstacle (แกน Y — ฝั่งห้องโดยสาร)
+  // 4) พื้นที่ด้านหลัง obstacle (แกน Y — ฝั่งห้องโดยสาร) — เต็มความสูง, เฉพาะแกน X ที่ทับ obstacle
   pushIfPositive(out, {
-    x: space.x, y: space.y, z: space.z,
-    width: space.width,
+    x: obs.x, y: space.y, z: fullHeightBottom,
+    width: obs.width,
     length: obs.y - space.y,
-    height: space.height,
+    height: fullHeightTop - fullHeightBottom,
   });
-  // 5) พื้นที่เหนือ obstacle (แกน Z — วางทับบนซุ้มล้อได้)
+  // 5) พื้นที่เหนือ obstacle (แกน Z) — จำกัดเฉพาะ footprint ของ obstacle
+  //    กล่องที่วางตรงนี้จะ "ทับ" บนซุ้มล้อจริง ๆ (ไม่ใช่ลอยเหนือพื้นว่าง)
   pushIfPositive(out, {
-    x: space.x, y: space.y, z: obs.z + obs.height,
-    width: space.width, length: space.length,
+    x: obs.x, y: obs.y, z: obs.z + obs.height,
+    width: obs.width, length: obs.length,
     height: space.z + space.height - (obs.z + obs.height),
   });
-  // 6) พื้นที่ใต้ obstacle (แกน Z — ไม่ควรเกิด)
+  // 6) พื้นที่ใต้ obstacle (แกน Z — ปกติไม่เกิด)
   pushIfPositive(out, {
-    x: space.x, y: space.y, z: space.z,
-    width: space.width, length: space.length,
+    x: obs.x, y: obs.y, z: space.z,
+    width: obs.width, length: obs.length,
     height: obs.z - space.z,
   });
   return out;
@@ -163,6 +174,9 @@ function processObstacles(
   let spaces: Space3D[] = [initialSpace];
 
   // สำหรับแต่ละ obstacle จะแบ่ง spaces ที่ทับมันออก
+  // สำคัญ: filter เฉพาะ obstacles ที่ "ประมวลผลแล้ว" เท่านั้น
+  // (ถ้า filter ทุกตัว จะลบ space ที่กำลังจะถูกตัดในรอบถัดไปทิ้งไปก่อน)
+  const processedObstacles: PlacedBox[] = [];
   for (const obs of placedObstacles) {
     const newSpaces: Space3D[] = [];
     for (const space of spaces) {
@@ -174,18 +188,17 @@ function processObstacles(
       }
     }
 
-    // deduplicate + ลบ spaces ที่ยังทับ obstacle ตัวเดิมหรือ obstacle ก่อนหน้า
+    processedObstacles.push(obs);
+
+    // deduplicate + ลบ spaces ที่ทับ obstacle ที่ประมวลผลแล้วเท่านั้น
     spaces = deduplicateSpaces(newSpaces).filter(s =>
-      placedObstacles.every(po => !spacesOverlap(s, po))
+      processedObstacles.every(po => !spacesOverlap(s, po))
     );
   }
 
-  // ลบ spaces ที่อยู่ในอีก space หนึ่ง (redundant)
-  spaces = deduplicateSpaces(spaces).filter((space, idx, arr) => {
-    return !arr.some((other, otherIdx) =>
-      otherIdx !== idx && isSpaceInside(space, other)
-    );
-  });
+  // ลบเฉพาะ duplicates ที่ซ้ำกันทุกมิติ — ไม่ใช้ isSpaceInside เพราะพื้นที่ว่าง
+  // ในตำแหน่งต่างกันถือเป็นคนละช่องกัน (isSpaceInside ลบทิ้งได้ผิด)
+  spaces = deduplicateSpaces(spaces);
 
   return { spaces, placedObstacles };
 }
